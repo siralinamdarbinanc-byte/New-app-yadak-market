@@ -1,7 +1,8 @@
 import React, { useState } from 'react';
-import { X, Plus, Tag, DollarSign, Barcode, MapPin, Package, Layers } from 'lucide-react';
+import { X, Plus, Tag, DollarSign, Barcode, MapPin, Package, Layers, Camera } from 'lucide-react';
 import { Product } from '../types';
 import { inferCategoryFromName, inferVehiclesFromName } from '../utils/pricing';
+import { BarcodeScannerModal } from './BarcodeScannerModal';
 
 interface AddProductModalProps {
   isOpen: boolean;
@@ -30,6 +31,7 @@ export const AddProductModal: React.FC<AddProductModalProps> = ({
   const [stock, setStock] = useState(10);
   const [minStock, setMinStock] = useState(3);
   const [vehicles, setVehicles] = useState('');
+  const [isScanModalOpen, setIsScanModalOpen] = useState(false);
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -142,15 +144,46 @@ export const AddProductModal: React.FC<AddProductModalProps> = ({
             </div>
 
             <div>
-              <label className="block text-xs font-semibold text-slate-300 mb-1">محل در انبار (قفسه):</label>
-              <input
-                type="text"
-                value={location}
-                onChange={(e) => setLocation(e.target.value)}
-                placeholder="مثلاً قفسه B-04"
-                className="w-full px-3.5 py-2.5 bg-slate-950 border border-slate-700 rounded-xl text-xs text-slate-100 placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-emerald-500"
-              />
+              <div className="flex items-center justify-between mb-1">
+                <label className="block text-xs font-semibold text-slate-300">کد بارکد:</label>
+                <button
+                  type="button"
+                  onClick={() => setIsScanModalOpen(true)}
+                  className="text-[11px] text-emerald-400 hover:text-emerald-300 font-bold flex items-center gap-1 hover:underline transition-colors"
+                >
+                  <Camera className="w-3.5 h-3.5" />
+                  <span>اسکن دوربین</span>
+                </button>
+              </div>
+              <div className="flex gap-1.5">
+                <input
+                  type="text"
+                  value={barcode}
+                  onChange={(e) => setBarcode(e.target.value)}
+                  placeholder="مثلاً 6260123456789"
+                  className="flex-1 px-3 py-2 bg-slate-950 border border-slate-700 rounded-xl text-xs text-slate-100 font-mono placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                />
+                <button
+                  type="button"
+                  onClick={() => setIsScanModalOpen(true)}
+                  className="px-2.5 py-2 bg-emerald-600/20 hover:bg-emerald-600/30 border border-emerald-500/40 text-emerald-300 rounded-xl text-xs font-bold flex items-center gap-1 transition-colors shrink-0"
+                  title="اسکن بارکد با دوربین"
+                >
+                  <Camera className="w-3.5 h-3.5 text-emerald-400" />
+                </button>
+              </div>
             </div>
+          </div>
+
+          <div>
+            <label className="block text-xs font-semibold text-slate-300 mb-1">محل در انبار (قفسه):</label>
+            <input
+              type="text"
+              value={location}
+              onChange={(e) => setLocation(e.target.value)}
+              placeholder="مثلاً قفسه B-04"
+              className="w-full px-3.5 py-2.5 bg-slate-950 border border-slate-700 rounded-xl text-xs text-slate-100 placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-emerald-500"
+            />
           </div>
 
           <div className="grid grid-cols-2 gap-3">
@@ -208,6 +241,17 @@ export const AddProductModal: React.FC<AddProductModalProps> = ({
         </form>
 
       </div>
+
+      <BarcodeScannerModal
+        isOpen={isScanModalOpen}
+        onClose={() => setIsScanModalOpen(false)}
+        title="اسکن و ثبت بارکد کالا"
+        subtitle="بارکد روی جعبه یا قطعه را مقابل دوربین قرار دهید"
+        onScanCode={(scannedCode) => {
+          setBarcode(scannedCode);
+          setIsScanModalOpen(false);
+        }}
+      />
     </div>
   );
 };

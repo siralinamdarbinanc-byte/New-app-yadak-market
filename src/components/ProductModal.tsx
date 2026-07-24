@@ -1,7 +1,8 @@
 import React, { useState } from 'react';
 import { Product, BrandMarkupMap, CategoryMarkupMap, CurrencyMode } from '../types';
 import { calculatePriceResult, formatCurrency, inferCategoryFromName, inferVehiclesFromName } from '../utils/pricing';
-import { X, Tag, DollarSign, TrendingUp, Printer, Copy, Check, Barcode, Save, MapPin, Package, AlertTriangle, Layers, Car, Calendar, Plus, Minus } from 'lucide-react';
+import { X, Tag, DollarSign, TrendingUp, Printer, Copy, Check, Barcode, Save, MapPin, Package, AlertTriangle, Layers, Car, Calendar, Plus, Minus, Camera } from 'lucide-react';
+import { BarcodeScannerModal } from './BarcodeScannerModal';
 
 interface ProductModalProps {
   product: Product | null;
@@ -26,6 +27,7 @@ export const ProductModal: React.FC<ProductModalProps> = ({
 
   const [copied, setCopied] = useState(false);
   const [isEditing, setIsEditing] = useState(false);
+  const [isScanModalOpen, setIsScanModalOpen] = useState(false);
 
   // Form edit states
   const [editName, setEditName] = useState(product.name);
@@ -198,14 +200,35 @@ export const ProductModal: React.FC<ProductModalProps> = ({
                 </div>
 
                 <div>
-                  <label className="block text-xs font-bold text-slate-300 mb-1">کد بارکد:</label>
-                  <input
-                    type="text"
-                    value={editBarcode}
-                    onChange={(e) => setEditBarcode(e.target.value)}
-                    placeholder="مثلاً 6260123456789"
-                    className="w-full px-3 py-2 bg-slate-950 border border-slate-700 rounded-xl text-sm text-slate-100 font-mono focus:outline-none focus:ring-2 focus:ring-purple-500"
-                  />
+                  <div className="flex items-center justify-between mb-1">
+                    <label className="block text-xs font-bold text-slate-300">کد بارکد:</label>
+                    <button
+                      type="button"
+                      onClick={() => setIsScanModalOpen(true)}
+                      className="text-[11px] text-purple-400 hover:text-purple-300 font-bold flex items-center gap-1 hover:underline transition-colors"
+                    >
+                      <Camera className="w-3.5 h-3.5" />
+                      <span>اسکن با دوربین</span>
+                    </button>
+                  </div>
+                  <div className="flex gap-1.5">
+                    <input
+                      type="text"
+                      value={editBarcode}
+                      onChange={(e) => setEditBarcode(e.target.value)}
+                      placeholder="مثلاً 6260123456789"
+                      className="flex-1 px-3 py-2 bg-slate-950 border border-slate-700 rounded-xl text-sm text-slate-100 font-mono focus:outline-none focus:ring-2 focus:ring-purple-500"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setIsScanModalOpen(true)}
+                      className="px-3 py-2 bg-purple-600/20 hover:bg-purple-600/30 border border-purple-500/40 text-purple-300 rounded-xl text-xs font-bold flex items-center gap-1.5 transition-colors shrink-0"
+                      title="اسکن بارکد با دوربین"
+                    >
+                      <Camera className="w-4 h-4 text-purple-400" />
+                      <span className="hidden sm:inline">اسکن</span>
+                    </button>
+                  </div>
                 </div>
               </div>
 
@@ -361,12 +384,22 @@ export const ProductModal: React.FC<ProductModalProps> = ({
                     </div>
                   </div>
 
-                  <div className="flex items-center gap-2">
-                    <Barcode className="w-4 h-4 text-indigo-400 shrink-0" />
-                    <div>
-                      <span className="text-slate-400 block">کد فنی OEM / بارکد:</span>
-                      <strong className="text-slate-200 text-sm font-mono">{product.oemCode || product.barcode || 'ثبت نشده'}</strong>
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <Barcode className="w-4 h-4 text-indigo-400 shrink-0" />
+                      <div>
+                        <span className="text-slate-400 block">کد فنی OEM / بارکد:</span>
+                        <strong className="text-slate-200 text-sm font-mono">{product.oemCode || product.barcode || 'ثبت نشده'}</strong>
+                      </div>
                     </div>
+                    <button
+                      type="button"
+                      onClick={() => setIsScanModalOpen(true)}
+                      className="p-1.5 bg-slate-900 hover:bg-slate-800 text-purple-400 border border-slate-700 rounded-lg text-xs flex items-center gap-1 transition-colors print:hidden"
+                      title="ثبت یا اسکن بارکد با دوربین"
+                    >
+                      <Camera className="w-3.5 h-3.5" />
+                    </button>
                   </div>
                 </div>
 
@@ -440,6 +473,20 @@ export const ProductModal: React.FC<ProductModalProps> = ({
         </div>
 
       </div>
+
+      <BarcodeScannerModal
+        isOpen={isScanModalOpen}
+        onClose={() => setIsScanModalOpen(false)}
+        title="اسکن و ثبت بارکد قطعه"
+        subtitle={`اسکن بارکد با دوربین جهت ثبت برای قطعه "${product.name}"`}
+        onScanCode={(scannedCode) => {
+          setEditBarcode(scannedCode);
+          setIsScanModalOpen(false);
+          if (!isEditing) {
+            setIsEditing(true);
+          }
+        }}
+      />
     </div>
   );
 };
