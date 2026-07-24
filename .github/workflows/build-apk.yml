@@ -9,7 +9,6 @@ on:
 jobs:
   build-apk:
     runs-on: ubuntu-latest
-
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
@@ -38,6 +37,35 @@ jobs:
         run: |
           bunx cap add android || true
           bunx cap sync android
+
+      - name: Configure Android Signing
+        run: |
+          cat << 'GRADLE_EOF' > patch-gradle.js
+          const fs = require('fs');
+          const path = 'android/app/build.gradle';
+          let content = fs.readFileSync(path, 'utf8');
+
+          const signingBlock = \`
+              signingConfigs {
+                  if (System.getenv("KEYSTORE_PATH")) {
+                      release {
+                          storeFile file(System.getenv("KEYSTORE_PATH"))
+                          storePassword System.getenv("STORE_PASSWORD")
+                          keyAlias System.getenv("KEY_ALIAS")
+                          keyPassword System.getenv("KEY_PASSWORD")
+                      }
+                  }
+              }
+          \`;
+
+          content = content.replace(/(android\\s*\\{)/, '\$1' + signingBlock);
+          content = content.replace(/signingConfig\\s+signingConfigs\\.debug/g, 
+            'if (System.getenv("KEYSTORE_PATH")) { signingConfig signingConfigs.release } else { signingConfig signingConfigs.debug }');
+
+          fs.writeFileSync(path, content);
+          console.log("Gradle patched successfully!");
+          GRADLE_EOF
+          node patch-gradle.js
 
       - name: Build Release APK
         env:
