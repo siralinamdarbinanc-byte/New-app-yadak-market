@@ -39,13 +39,6 @@ jobs:
           bunx cap add android || true
           bunx cap sync android
 
-      - name: Configure Signing
-        run: |
-          sed -i "/android {/a\
-    signingConfigs {\n        release {\n            storeFile file("${GITHUB_WORKSPACE}/yadak.keystore")\n            storePassword "${{ secrets.STORE_PASSWORD }}"\n            keyAlias "${{ secrets.KEY_ALIAS }}"\n            keyPassword "${{ secrets.KEY_PASSWORD }}"\n        }\n    }" android/app/build.gradle
-          sed -i "/buildTypes {/a\
-        release { signingConfig signingConfigs.release }" android/app/build.gradle
-
       - name: Build Release APK
         env:
           KEYSTORE_PATH: ${{ github.workspace }}/yadak.keystore
