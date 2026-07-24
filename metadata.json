@@ -1,0 +1,6 @@
+{
+  "name": "یدک مارکت (زینلی)",
+  "description": "سامانه جستجو، مدیریت قیمت و اسکن بارکد قطعات خودرو یدک مارکت زینلی",
+  "requestFramePermissions": ["camera"],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

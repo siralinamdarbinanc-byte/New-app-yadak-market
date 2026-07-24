@@ -1,0 +1,193 @@
+import React, { useState } from 'react';
+import { X, Cloud, RefreshCw, CheckCircle2, AlertCircle, Link, ArrowLeft, ArrowRight, ShieldCheck } from 'lucide-react';
+import { Product, GoogleSheetsConfig, CsvPreview } from '../types';
+import { fetchAndProcessGoogleSheet } from '../utils/googleSheets';
+import { formatPersianNumber } from '../utils/pricing';
+
+interface GoogleSheetsModalProps {
+  isOpen: boolean;
+  onClose: () => void;
+  config: GoogleSheetsConfig;
+  onSaveConfig: (newConfig: GoogleSheetsConfig) => void;
+  existingProducts: Product[];
+  onApplySync: (newProducts: Product[], duplicatesToUpdate: any[]) => void;
+}
+
+export const GoogleSheetsModal: React.FC<GoogleSheetsModalProps> = ({
+  isOpen,
+  onClose,
+  config,
+  onSaveConfig,
+  existingProducts,
+  onApplySync,
+}) => {
+  if (!isOpen) return null;
+
+  const [sheetUrlInput, setSheetUrlInput] = useState(config.sheetUrl || '');
+  const [autoSync, setAutoSync] = useState(config.autoSync || false);
+  const [loading, setLoading] = useState(false);
+  const [errorMsg, setErrorMsg] = useState('');
+  const [preview, setPreview] = useState<CsvPreview | null>(null);
+
+  const handleTestAndSync = async () => {
+    if (!sheetUrlInput.trim()) {
+      setErrorMsg('لطفا لینک کپی شده از گوگل شیت (Google Sheet URL) را وارد کنید.');
+      return;
+    }
+
+    setLoading(true);
+    setErrorMsg('');
+    setPreview(null);
+
+    try {
+      const result = await fetchAndProcessGoogleSheet(sheetUrlInput, existingProducts);
+      setPreview(result);
+      
+      // Save sheet url config
+      onSaveConfig({
+        sheetUrl: sheetUrlInput,
+        autoSync,
+        lastSync: new Date().toLocaleTimeString('fa-IR') + ' - ' + new Date().toLocaleDateString('fa-IR'),
+      });
+    } catch (err: any) {
+      setErrorMsg(err.message || 'خطا در ارتباط با گوگل شیت.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleConfirmSync = () => {
+    if (!preview) return;
+    onApplySync(preview.newProducts, preview.duplicateMatches);
+    onClose();
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/85 backdrop-blur-md animate-fade-in">
+      <div className="bg-slate-900 border border-slate-800 rounded-3xl w-full max-w-2xl p-6 shadow-2xl relative overflow-hidden text-slate-100 max-h-[92vh] flex flex-col">
+        
+        {/* Header */}
+        <div className="flex items-center justify-between gap-4 pb-4 border-b border-slate-800 shrink-0">
+          <div className="flex items-center gap-2.5">
+            <div className="w-10 h-10 rounded-xl bg-emerald-600/20 border border-emerald-500/30 flex items-center justify-center text-emerald-400">
+              <Cloud className="w-5 h-5" />
+            </div>
+            <div>
+              <h2 className="text-base font-bold text-slate-100">همگام‌سازی با گوگل شیت (Google Sheets)</h2>
+              <p className="text-xs text-slate-400">دریافت آنلاین خودکار لیست قطعات و قیمت‌ها بدون نیاز به ثبت دستی</p>
+            </div>
+          </div>
+
+          <button
+            onClick={onClose}
+            className="p-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-white transition-colors"
+          >
+            <X className="w-5 h-5" />
+          </button>
+        </div>
+
+        {/* Content Body */}
+        <div className="py-5 overflow-y-auto space-y-4 flex-1">
+          
+          {/* Input box */}
+          <div className="space-y-3 bg-slate-950 border border-slate-800 rounded-2xl p-4">
+            <label className="block text-xs font-bold text-slate-200">
+              لینک عمومی فایل Google Sheet آنلاین:
+            </label>
+            <div className="flex gap-2">
+              <input
+                type="text"
+                value={sheetUrlInput}
+                onChange={(e) => setSheetUrlInput(e.target.value)}
+                placeholder="https://docs.google.com/spreadsheets/d/1ABC.../edit"
+                className="flex-1 px-3.5 py-2.5 bg-slate-900 border border-slate-700 rounded-xl text-xs text-slate-100 font-mono placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-emerald-500"
+              />
+              <button
+                onClick={handleTestAndSync}
+                disabled={loading}
+                className="px-4 py-2.5 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white text-xs font-bold rounded-xl flex items-center gap-1.5 transition-colors shadow-lg shadow-emerald-600/20 shrink-0"
+              >
+                <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
+                <span>{loading ? 'در حال دریافت...' : 'بررسی و همگام‌سازی'}</span>
+              </button>
+            </div>
+
+            {config.lastSync && (
+              <div className="text-[11px] text-emerald-400 flex items-center gap-1.5 pt-1">
+                <ShieldCheck className="w-3.5 h-3.5" />
+                <span>آخرین همگام‌سازی موفق: {config.lastSync}</span>
+              </div>
+            )}
+          </div>
+
+          {/* Guide Note */}
+          <div className="bg-slate-950/60 border border-slate-800 rounded-2xl p-4 text-xs text-slate-400 space-y-2">
+            <h4 className="font-bold text-slate-300 flex items-center gap-1.5">
+              <Link className="w-4 h-4 text-purple-400" />
+              راهنمای آماده‌سازی لینک Google Sheet:
+            </h4>
+            <ol className="list-decimal list-inside space-y-1 text-[11px] text-slate-400 leading-relaxed">
+              <li>فایل گوگل شیت قطعات خود را باز کنید.</li>
+              <li>روی دکمه Share (اشتراک‌گذاری) بالا سمت راست کلیک کنید و دسترسی را روی <strong>Anyone with the link (هرکس با لینک)</strong> قرار دهید.</li>
+              <li>آدرس فایل را از مرورگر کپی کرده و در کادر بالا وارد کنید.</li>
+            </ol>
+          </div>
+
+          {/* Sync Result Preview */}
+          {preview && (
+            <div className="space-y-3 bg-slate-950 border border-slate-800 rounded-2xl p-4">
+              <h3 className="text-xs font-bold text-emerald-400 flex items-center gap-1.5">
+                <CheckCircle2 className="w-4 h-4" />
+                نتیجه بررسی فایل گوگل شیت:
+              </h3>
+
+              <div className="grid grid-cols-2 gap-3 text-xs">
+                <div className="p-3 bg-slate-900 border border-slate-800 rounded-xl">
+                  <span className="text-slate-400 block mb-1">اقلام جدید شناسایی شده:</span>
+                  <strong className="text-emerald-300 font-mono text-base">
+                    {formatPersianNumber(preview.newProducts.length)} کالا
+                  </strong>
+                </div>
+
+                <div className="p-3 bg-slate-900 border border-slate-800 rounded-xl">
+                  <span className="text-slate-400 block mb-1">اقلام دارای تغییر قیمت:</span>
+                  <strong className="text-amber-300 font-mono text-base">
+                    {formatPersianNumber(preview.duplicateMatches.length)} کالا
+                  </strong>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {errorMsg && (
+            <div className="p-3.5 bg-rose-950/50 border border-rose-800/60 rounded-xl text-rose-300 text-xs flex items-center gap-2">
+              <AlertCircle className="w-4 h-4 shrink-0" />
+              <span>{errorMsg}</span>
+            </div>
+          )}
+
+        </div>
+
+        {/* Footer */}
+        <div className="pt-4 border-t border-slate-800 flex items-center justify-between shrink-0">
+          <button
+            onClick={onClose}
+            className="px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-medium"
+          >
+            بستن
+          </button>
+
+          {preview && (
+            <button
+              onClick={handleConfirmSync}
+              className="px-5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold shadow-lg shadow-emerald-600/20"
+            >
+              اعمال اطلاعات گوگل شیت به انبار
+            </button>
+          )}
+        </div>
+
+      </div>
+    </div>
+  );
+};
