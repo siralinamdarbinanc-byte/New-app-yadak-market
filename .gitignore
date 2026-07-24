@@ -6,5 +6,3 @@ coverage/
 *.log
 .env*
 !.env.example
-keystore_base64.txt
-keystore_base64.txt
