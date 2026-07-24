@@ -4,7 +4,6 @@ on:
   push:
     branches:
       - main
-      - master
   workflow_dispatch:
 
 jobs:
@@ -24,7 +23,7 @@ jobs:
       - name: Build Web Application
         run: bun run build
 
-      - name: Setup Java JDK 17
+      - name: Setup Java
         uses: actions/setup-java@v4
         with:
           distribution: temurin
@@ -51,8 +50,12 @@ jobs:
           chmod +x gradlew
           ./gradlew assembleRelease --stacktrace
 
+      - name: Find APK
+        run: |
+          find android -type f -name "*.apk" -print
+
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
           name: YadakMarket-Release-APK
-          path: android/app/build/outputs/apk/release/app-release.apk
+          path: android/**/build/outputs/apk/**/*.apk
