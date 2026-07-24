@@ -40,6 +40,7 @@ export const BarcodeScannerModal: React.FC<BarcodeScannerModalProps> = ({
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const codeReaderRef = useRef<BrowserMultiFormatReader | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const captureInputRef = useRef<HTMLInputElement | null>(null);
   const activeStreamRef = useRef<MediaStream | null>(null);
   const scanTimerRef = useRef<any>(null);
   const nativeDetectorRef = useRef<any>(null);
@@ -166,30 +167,84 @@ export const BarcodeScannerModal: React.FC<BarcodeScannerModalProps> = ({
       }
     }
 
+    const reader = getCodeReaderInstance();
+
+    // Enumerate video devices for camera selector
     try {
-      const reader = getCodeReaderInstance();
+      const devList = await reader.listVideoInputDevices();
+      setDevices(devList);
+    } catch (e) {
+      console.debug('Error listing video devices:', e);
+    }
 
-      // Enumerate devices if not done yet
+    // Try multiple camera constraints from ideal to simplest fallback
+    const constraintAttempts: MediaStreamConstraints[] = [];
+
+    if (targetDeviceId) {
+      constraintAttempts.push({ video: { deviceId: { exact: targetDeviceId } } });
+    }
+
+    constraintAttempts.push(
+      { video: { facingMode: { ideal: currentFacing }, width: { ideal: 1280 }, height: { ideal: 720 } } },
+      { video: { facingMode: { ideal: currentFacing } } },
+      { video: { facingMode: currentFacing } },
+      { video: true }
+    );
+
+    let stream: MediaStream | null = null;
+    let lastError: any = null;
+
+    for (const constraint of constraintAttempts) {
       try {
-        const devList = await reader.listVideoInputDevices();
-        setDevices(devList);
-      } catch (e) {
-        console.debug('Error listing video devices:', e);
+        stream = await navigator.mediaDevices.getUserMedia(constraint);
+        if (stream) break;
+      } catch (err: any) {
+        lastError = err;
+        console.debug('Camera constraint attempt failed:', constraint, err);
       }
+    }
 
-      const videoConstraints: any = targetDeviceId
-        ? { deviceId: { exact: targetDeviceId } }
-        : {
-            facingMode: { ideal: currentFacing },
-            width: { ideal: 1280 },
-            height: { ideal: 720 },
-            focusMode: 'continuous',
-          };
+    if (!stream) {
+      console.error('All camera stream attempts failed:', lastError);
+      setIsLoading(false);
+      setCameraActive(false);
 
-      // Use ZXing decodeFromConstraints which binds video and starts continuous scanner
+      if (lastError?.name === 'NotAllowedError' || lastError?.name === 'PermissionDeniedError') {
+        setErrorMsg('دسترسی به دوربین توسط کاربر یا مرورگر مسدود شده است. لطفاً در تنظیمات مرورگر/برنامه اجازه دسترسی به دوربین را دهید.');
+      } else if (lastError?.name === 'NotFoundError' || lastError?.name === 'DevicesNotFoundError') {
+        setErrorMsg('هیچ دوربینی روی دستگاه یافت نشد. می‌توانید کد را دستی یا از طریق عکس وارد کنید.');
+      } else {
+        setErrorMsg('امکان دریافت تصویر زنده از دوربین وجود ندارد. می‌توانید از دکمه عکاسی مستقیم یا وارد کردن دستی کد استفاده کنید.');
+      }
+      return;
+    }
+
+    try {
+      activeStreamRef.current = stream;
+
       if (videoRef.current) {
-        await reader.decodeFromConstraints(
-          { video: videoConstraints },
+        videoRef.current.srcObject = stream;
+        videoRef.current.setAttribute('playsinline', 'true');
+        videoRef.current.setAttribute('muted', 'true');
+        await videoRef.current.play().catch((e) => console.debug('Video play error:', e));
+
+        setCameraActive(true);
+        setIsLoading(false);
+
+        // Try applying continuous focus mode if supported natively on active track
+        const track = stream.getVideoTracks()[0];
+        if (track && 'applyConstraints' in track) {
+          try {
+            await (track as any).applyConstraints({
+              advanced: [{ focusMode: 'continuous' }]
+            });
+          } catch (e) {
+            // Ignore if focusMode not supported
+          }
+        }
+
+        // Continuous decoding with ZXing from the live video element
+        reader.decodeFromVideoElement(
           videoRef.current,
           (result, err) => {
             if (result && result.getText()) {
@@ -200,15 +255,7 @@ export const BarcodeScannerModal: React.FC<BarcodeScannerModalProps> = ({
           }
         );
 
-        setCameraActive(true);
-        setIsLoading(false);
-
-        // Save active media stream for torch/flash
-        if (videoRef.current.srcObject) {
-          activeStreamRef.current = videoRef.current.srcObject as MediaStream;
-        }
-
-        // Secondary interval checking with native BarcodeDetector if available
+        // Secondary high-frequency check with native BarcodeDetector if available
         scanTimerRef.current = setInterval(async () => {
           if (!videoRef.current || videoRef.current.readyState < 2) return;
           if (nativeDetectorRef.current) {
@@ -220,23 +267,16 @@ export const BarcodeScannerModal: React.FC<BarcodeScannerModalProps> = ({
                 handleApplyCode(code);
               }
             } catch (e) {
-              // ignore frame errors
+              // ignore frame decode errors
             }
           }
         }, 150);
       }
     } catch (err: any) {
-      console.error('Camera access error:', err);
+      console.error('Video decode binding error:', err);
       setIsLoading(false);
       setCameraActive(false);
-
-      if (err.name === 'NotAllowedError' || err.name === 'PermissionDeniedError') {
-        setErrorMsg('دسترسی به دوربین توسط کاربر یا مرورگر مسدود شده است. لطفاً در تنظیمات مرورگر اجازه دسترسی دهید.');
-      } else if (err.name === 'NotFoundError' || err.name === 'DevicesNotFoundError') {
-        setErrorMsg('هیچ دوربینی در دستگاه یافت نشد. می‌توانید بارکد را دستی یا با عکس وارد کنید.');
-      } else {
-        setErrorMsg('امکان راه اندازی مستقیم دوربین وجود ندارد. می‌توانید بارکد را دستی وارد کنید یا تصویر آن را آپلود کنید.');
-      }
+      setErrorMsg('خطا در اتصال تصویر دوربین. می‌توانید از عکاسی مستقیم یا بارکدخوان دستی استفاده کنید.');
     }
   };
 
@@ -411,15 +451,23 @@ export const BarcodeScannerModal: React.FC<BarcodeScannerModalProps> = ({
                 </button>
               </div>
 
-              {/* Manual capture button */}
+              {/* Manual capture button & Native camera capture */}
               <div className="absolute bottom-3 inset-x-3 flex justify-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => captureInputRef.current?.click()}
+                  className="px-3 py-1.5 bg-purple-600 hover:bg-purple-500 text-white rounded-xl text-xs font-bold shadow-lg backdrop-blur-md flex items-center gap-1.5 border border-purple-400/50"
+                >
+                  <Camera className="w-3.5 h-3.5 text-white" />
+                  <span>عکاسی مستقیم از بارکد</span>
+                </button>
                 <button
                   type="button"
                   onClick={() => fileInputRef.current?.click()}
                   className="px-3 py-1.5 bg-slate-900/90 hover:bg-slate-800 text-slate-200 rounded-xl text-xs font-medium shadow-md backdrop-blur-md flex items-center gap-1.5 border border-slate-700"
                 >
                   <Upload className="w-3.5 h-3.5 text-indigo-400" />
-                  <span>آپلود عکس بارکد</span>
+                  <span>انتخاب عکس</span>
                 </button>
               </div>
             </>
@@ -427,38 +475,62 @@ export const BarcodeScannerModal: React.FC<BarcodeScannerModalProps> = ({
 
           {/* Loading or Off State Overlay */}
           {(!cameraActive || isLoading) && (
-            <div className="absolute inset-0 bg-slate-950/80 backdrop-blur-sm flex flex-col items-center justify-center p-6 text-center z-10">
+            <div className="absolute inset-0 bg-slate-950/80 backdrop-blur-sm flex flex-col items-center justify-center p-5 text-center z-10">
               {isLoading ? (
                 <div className="flex flex-col items-center">
                   <RefreshCw className="w-8 h-8 text-purple-400 animate-spin mb-2" />
                   <p className="text-xs text-slate-300 font-medium">در حال راه اندازی دوربین...</p>
                 </div>
               ) : (
-                <div className="flex flex-col items-center">
-                  <Camera className="w-9 h-9 text-slate-500 mb-2" />
-                  <p className="text-xs text-slate-400 mb-3">دوربین آماده نیست یا مسدود است.</p>
-                  <div className="flex gap-2">
+                <div className="flex flex-col items-center max-w-xs">
+                  <Camera className="w-9 h-9 text-purple-400 mb-2" />
+                  <p className="text-xs text-slate-200 font-bold mb-1">دسترسی ویدیو مستقیم زنده محدود است</p>
+                  <p className="text-[11px] text-slate-400 mb-3 leading-relaxed">
+                    می‌توانید با دکمه زیر مستقیماً دوربین گوشی را باز کرده و از بارکد عکس بگیرید:
+                  </p>
+                  <div className="flex flex-col w-full gap-2">
                     <button
                       type="button"
-                      onClick={() => startCamera(selectedDeviceId)}
-                      className="px-3.5 py-2 rounded-xl bg-purple-600 hover:bg-purple-500 text-white text-xs font-bold transition-colors"
+                      onClick={() => captureInputRef.current?.click()}
+                      className="w-full py-2 px-3 rounded-xl bg-purple-600 hover:bg-purple-500 text-white text-xs font-bold shadow-md flex items-center justify-center gap-1.5 transition-colors"
                     >
-                      تلاش مجدد دوربین
+                      <Camera className="w-4 h-4" />
+                      <span>عکاسی مستقیم با دوربین گوشی</span>
                     </button>
-                    <button
-                      type="button"
-                      onClick={() => fileInputRef.current?.click()}
-                      className="px-3.5 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 text-xs font-bold transition-colors flex items-center gap-1.5"
-                    >
-                      <Upload className="w-3.5 h-3.5 text-purple-400" />
-                      <span>آپلود تصویر</span>
-                    </button>
+
+                    <div className="flex gap-2">
+                      <button
+                        type="button"
+                        onClick={() => startCamera(selectedDeviceId)}
+                        className="flex-1 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 text-[11px] font-bold border border-slate-700 transition-colors"
+                      >
+                        تلاش مجدد ویدیو
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => fileInputRef.current?.click()}
+                        className="flex-1 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 text-[11px] font-bold transition-colors flex items-center justify-center gap-1"
+                      >
+                        <Upload className="w-3.5 h-3.5 text-purple-400" />
+                        <span>انتخاب فایل</span>
+                      </button>
+                    </div>
                   </div>
                 </div>
               )}
             </div>
           )}
         </div>
+
+        {/* Native Camera Capture Input (Forces Android Camera App) */}
+        <input
+          ref={captureInputRef}
+          type="file"
+          accept="image/*"
+          capture="environment"
+          onChange={handleFileUpload}
+          className="hidden"
+        />
 
         {/* Hidden File Input for Image Upload */}
         <input

@@ -6,6 +6,29 @@
   }
 }
 
+@keyframes shimmer {
+  0% { background-position: -200% 0; }
+  100% { background-position: 200% 0; }
+}
+
+@keyframes pulse-glow {
+  0%, 100% { opacity: 0.85; filter: drop-shadow(0 0 8px rgba(168, 85, 247, 0.4)); }
+  50% { opacity: 1; filter: drop-shadow(0 0 16px rgba(236, 72, 153, 0.7)); }
+}
+
+.animate-shimmer-text {
+  background: linear-gradient(90deg, #c084fc 0%, #f472b6 25%, #60a5fa 50%, #34d399 75%, #c084fc 100%);
+  background-size: 200% auto;
+  color: transparent;
+  -webkit-background-clip: text;
+  background-clip: text;
+  animation: shimmer 5s linear infinite;
+}
+
+.animate-pulse-glow {
+  animation: pulse-glow 3.5s ease-in-out infinite;
+}
+
 /* Custom scrollbar styling */
 ::-webkit-scrollbar {
   width: 6px;
@@ -21,3 +44,4 @@
 ::-webkit-scrollbar-thumb:hover {
   background: rgba(147, 51, 234, 0.7);
 }
+

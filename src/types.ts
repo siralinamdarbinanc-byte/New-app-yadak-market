@@ -88,3 +88,9 @@ export interface StoreAnalytics {
 
 export type CurrencyMode = 'RIAL' | 'TOMAN';
 
+export interface FontSizeSettings {
+  titleSize: 'sm' | 'md' | 'lg' | 'xl';
+  priceSize: 'md' | 'lg' | 'xl' | '2xl';
+  detailsSize: 'xs' | 'sm' | 'md';
+}
+

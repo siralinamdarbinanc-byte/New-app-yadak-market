@@ -74,7 +74,7 @@ export function processCsvUpload(
     existingMap.set(key, p);
   });
 
-  let nextId = Math.max(0, ...existingProducts.map((p) => p.id || 0)) + 1;
+  let nextId = existingProducts.reduce((max, p) => Math.max(max, p.id || 0), 0) + 1;
 
   let nameColIdx = -1;
   let brandColIdx = -1;

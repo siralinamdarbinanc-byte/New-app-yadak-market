@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import initialProductsData from './data/products.json';
-import { Product, FilterState, BrandMarkupMap, CategoryMarkupMap, GoogleSheetsConfig, CurrencyMode } from './types';
+import { Product, FilterState, BrandMarkupMap, CategoryMarkupMap, GoogleSheetsConfig, CurrencyMode, FontSizeSettings } from './types';
 import { normalizePersianText, inferCategoryFromName, inferVehiclesFromName, calculateStoreAnalytics } from './utils/pricing';
 import { cleanSearchText, evaluateProductSearch } from './utils/search';
 import { Header } from './components/Header';
@@ -13,6 +13,8 @@ import { GoogleSheetsModal } from './components/GoogleSheetsModal';
 import { PricingSettingsModal } from './components/PricingSettingsModal';
 import { AnalyticsModal } from './components/AnalyticsModal';
 import { AddProductModal } from './components/AddProductModal';
+import { SettingsToolsModal } from './components/SettingsToolsModal';
+import { LocationModal } from './components/LocationModal';
 import { ChevronDown, Package, Layers, Sparkles, PhoneCall, RefreshCw, AlertTriangle, Cloud } from 'lucide-react';
 
 const ITEMS_PER_PAGE = 36;
@@ -81,6 +83,21 @@ export default function App() {
     return { sheetUrl: '', autoSync: false, lastSync: null };
   });
 
+  // Font Size Customization State
+  const [fontSizeSettings, setFontSizeSettings] = useState<FontSizeSettings>(() => {
+    const saved = localStorage.getItem('yadak_font_settings');
+    if (saved) {
+      try {
+        return JSON.parse(saved);
+      } catch (e) {}
+    }
+    return { titleSize: 'md', priceSize: 'lg', detailsSize: 'sm' };
+  });
+
+  useEffect(() => {
+    localStorage.setItem('yadak_font_settings', JSON.stringify(fontSizeSettings));
+  }, [fontSizeSettings]);
+
   // Filters State
   const [filters, setFilters] = useState<FilterState>({
     query: '',
@@ -93,21 +110,47 @@ export default function App() {
     maxPrice: null,
   });
 
-  // Modals state
+  // Modals & UI Layout State
   const [selectedProduct, setSelectedProduct] = useState<Product | null>(null);
+  const [locationProduct, setLocationProduct] = useState<Product | null>(null);
   const [isScannerOpen, setIsScannerOpen] = useState(false);
   const [isCsvModalOpen, setIsCsvModalOpen] = useState(false);
   const [isSheetsModalOpen, setIsSheetsModalOpen] = useState(false);
   const [isPricingModalOpen, setIsPricingModalOpen] = useState(false);
   const [isAnalyticsModalOpen, setIsAnalyticsModalOpen] = useState(false);
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
+  const [isSettingsToolsModalOpen, setIsSettingsToolsModalOpen] = useState(false);
+  const [isFilterOpen, setIsFilterOpen] = useState(false);
+
+  // Active filter badge count
+  const activeFilterCount = useMemo(() => {
+    let count = 0;
+    if (filters.selectedBrand) count++;
+    if (filters.selectedCategory) count++;
+    if (filters.selectedVehicle) count++;
+    if (filters.onlyLowStock) count++;
+    if (filters.sortOrder !== 'NAME_ASC') count++;
+    return count;
+  }, [filters]);
 
   // Pagination state
   const [visibleCount, setVisibleCount] = useState(ITEMS_PER_PAGE);
 
-  // Sync state changes to localStorage
+  // Reset pagination when filter criteria change
   useEffect(() => {
-    localStorage.setItem('yadak_products', JSON.stringify(products));
+    setVisibleCount(ITEMS_PER_PAGE);
+  }, [filters]);
+
+  // Sync state changes to localStorage with debouncing & quota handling
+  useEffect(() => {
+    const handler = setTimeout(() => {
+      try {
+        localStorage.setItem('yadak_products', JSON.stringify(products));
+      } catch (e) {
+        console.warn('localStorage storage limit reached for products', e);
+      }
+    }, 500);
+    return () => clearTimeout(handler);
   }, [products]);
 
   useEffect(() => {
@@ -262,6 +305,14 @@ export default function App() {
     );
   };
 
+  const handleUpdateLocation = (id: number, newLocation: string) => {
+    setProducts((prev) =>
+      prev.map((p) =>
+        p.id === id ? { ...p, location: newLocation, lastUpdate: new Date().toLocaleDateString('fa-IR') } : p
+      )
+    );
+  };
+
   const handleDeleteProduct = (id: number) => {
     if (window.confirm('آیا از حذف این قطعه از انبار مطمئن هستید؟')) {
       setProducts((prev) => prev.filter((p) => p.id !== id));
@@ -320,29 +371,32 @@ export default function App() {
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col font-sans selection:bg-purple-500 selection:text-white antialiased">
       
-      {/* Sticky Header & Search/Filter Section */}
+      {/* Ultra-Compact Sticky Header & Filter Bar */}
       <div className="sticky top-0 z-40 bg-slate-950/95 backdrop-blur-md border-b border-slate-800/80 shadow-2xl">
         <Header
           totalCount={products.length}
           filteredCount={filteredProducts.length}
-          lowStockCount={analytics.lowStockCount}
           currencyMode={currencyMode}
-          onToggleCurrency={handleToggleCurrency}
           onOpenScanner={() => setIsScannerOpen(true)}
-          onOpenCsvModal={() => setIsCsvModalOpen(true)}
-          onOpenSheetsModal={() => setIsSheetsModalOpen(true)}
-          onOpenPricingModal={() => setIsPricingModalOpen(true)}
-          onOpenAnalyticsModal={() => setIsAnalyticsModalOpen(true)}
           onOpenAddModal={() => setIsAddModalOpen(true)}
-          generalMarkup={generalMarkup}
+          onOpenSettingsToolsModal={() => setIsSettingsToolsModalOpen(true)}
+          isFilterOpen={isFilterOpen}
+          onToggleFilter={() => setIsFilterOpen((prev) => !prev)}
+          activeFilterCount={activeFilterCount}
+          searchQuery={filters.query}
+          onSearchQueryChange={(query) => {
+            setFilters((prev) => ({ ...prev, query }));
+            setVisibleCount(ITEMS_PER_PAGE);
+          }}
         />
 
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-2.5">
+        <div className="max-w-7xl mx-auto px-3 sm:px-6 lg:px-8">
           <SearchBar
+            isFilterOpen={isFilterOpen}
             filters={filters}
             onChange={(newFilters) => {
               setFilters(newFilters);
-              setVisibleCount(ITEMS_PER_PAGE); // Reset pagination on filter change
+              setVisibleCount(ITEMS_PER_PAGE);
             }}
             brands={uniqueBrands}
             categories={uniqueCategories}
@@ -394,10 +448,12 @@ export default function App() {
                   brandMarkupMap={brandMarkupMap}
                   categoryMarkupMap={categoryMarkupMap}
                   currencyMode={currencyMode}
+                  fontSizeSettings={fontSizeSettings}
                   onSelect={(p) => setSelectedProduct(p)}
                   onEdit={(p) => setSelectedProduct(p)}
                   onDelete={handleDeleteProduct}
                   onUpdateStock={handleUpdateStock}
+                  onOpenLocationModal={(p) => setLocationProduct(p)}
                 />
               ))}
             </div>
@@ -496,6 +552,29 @@ export default function App() {
         onAdd={handleAddProduct}
         brands={uniqueBrands}
         categories={uniqueCategories}
+      />
+
+      <SettingsToolsModal
+        isOpen={isSettingsToolsModalOpen}
+        onClose={() => setIsSettingsToolsModalOpen(false)}
+        currencyMode={currencyMode}
+        onToggleCurrency={handleToggleCurrency}
+        fontSizeSettings={fontSizeSettings}
+        onUpdateFontSizeSettings={setFontSizeSettings}
+        onOpenCsvModal={() => setIsCsvModalOpen(true)}
+        onOpenSheetsModal={() => setIsSheetsModalOpen(true)}
+        onOpenPricingModal={() => setIsPricingModalOpen(true)}
+        onOpenAnalyticsModal={() => setIsAnalyticsModalOpen(true)}
+        generalMarkup={generalMarkup}
+        lowStockCount={analytics.lowStockCount}
+        totalProductsCount={products.length}
+      />
+
+      <LocationModal
+        product={locationProduct}
+        isOpen={!!locationProduct}
+        onClose={() => setLocationProduct(null)}
+        onSaveLocation={handleUpdateLocation}
       />
 
     </div>

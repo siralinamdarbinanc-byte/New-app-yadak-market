@@ -22,13 +22,21 @@ export interface SearchMatchResult {
   score: number;
 }
 
-/**
- * Evaluates whether a product matches ALL query tokens (AND search)
- * and calculates a relevance score for smart sorting.
- */
-export function evaluateProductSearch(product: Product, queryTokens: string[]): SearchMatchResult {
-  if (!queryTokens || queryTokens.length === 0) {
-    return { matches: true, score: 0 };
+export interface ProductSearchCache {
+  normName: string;
+  normBrand: string;
+  normOem: string;
+  normBarcode: string;
+  idStr: string;
+  categoryStr: string;
+  vehiclesStr: string;
+  descStr: string;
+  fullCombinedText: string;
+}
+
+export function getProductSearchCache(product: Product): ProductSearchCache {
+  if ((product as any)._searchCache) {
+    return (product as any)._searchCache;
   }
 
   const normName = cleanSearchText(product.name);
@@ -41,6 +49,54 @@ export function evaluateProductSearch(product: Product, queryTokens: string[]): 
   const descStr = cleanSearchText(product.description || '');
 
   const fullCombinedText = `${normName} ${normBrand} ${normOem} ${normBarcode} ${idStr} ${categoryStr} ${vehiclesStr} ${descStr}`;
+
+  const cache: ProductSearchCache = {
+    normName,
+    normBrand,
+    normOem,
+    normBarcode,
+    idStr,
+    categoryStr,
+    vehiclesStr,
+    descStr,
+    fullCombinedText,
+  };
+
+  try {
+    Object.defineProperty(product, '_searchCache', {
+      value: cache,
+      writable: true,
+      configurable: true,
+      enumerable: false,
+    });
+  } catch (e) {
+    // fallback if non-configurable
+    (product as any)._searchCache = cache;
+  }
+
+  return cache;
+}
+
+/**
+ * Evaluates whether a product matches ALL query tokens (AND search)
+ * and calculates a relevance score for smart sorting.
+ */
+export function evaluateProductSearch(product: Product, queryTokens: string[]): SearchMatchResult {
+  if (!queryTokens || queryTokens.length === 0) {
+    return { matches: true, score: 0 };
+  }
+
+  const {
+    normName,
+    normBrand,
+    normOem,
+    normBarcode,
+    idStr,
+    categoryStr,
+    vehiclesStr,
+    descStr,
+    fullCombinedText,
+  } = getProductSearchCache(product);
 
   let totalScore = 0;
 

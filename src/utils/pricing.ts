@@ -71,19 +71,17 @@ export function formatPersianNumber(val: number | string): string {
   return formatted.replace(/\d/g, (d) => persianDigits[parseInt(d, 10)]);
 }
 
+const DIGIT_MAP: Record<string, string> = {
+  '۰': '0', '۱': '1', '۲': '2', '۳': '3', '۴': '4', '۵': '5', '۶': '6', '۷': '7', '۸': '8', '۹': '9',
+  '٠': '0', '١': '1', '٢': '2', '٣': '3', '٤': '4', '٥': '5', '٦': '6', '٧': '7', '٨': '8', '٩': '9',
+};
+
 /**
  * Converts Persian and Arabic digits in a string to English digits
  */
 export function normalizeDigits(s: string): string {
   if (!s) return '';
-  const persianDigits = '۰۱۲۳۴۵۶۷۸۹';
-  const arabicDigits = '٠١٢٣٤٥٦٧٨٩';
-  let result = s;
-  for (let i = 0; i < 10; i++) {
-    result = result.replace(new RegExp(persianDigits[i], 'g'), String(i));
-    result = result.replace(new RegExp(arabicDigits[i], 'g'), String(i));
-  }
-  return result;
+  return s.replace(/[۰-۹٠-٩]/g, (ch) => DIGIT_MAP[ch] || ch);
 }
 
 /**
