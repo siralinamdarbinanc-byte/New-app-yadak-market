@@ -33,10 +33,25 @@ export const ProductCard: React.FC<ProductCardProps> = ({
     ? product.vehicles
     : inferVehiclesFromName(product.name);
 
-  const stock = product.stock !== undefined ? product.stock : 10;
+  const stock = product.stock !== undefined ? product.stock : 0;
   const minStock = product.minStock !== undefined ? product.minStock : 3;
   const isLowStock = stock <= minStock;
   const location = product.location || 'قفسه عمومی';
+
+  const [isEditingStock, setIsEditingStock] = useState(false);
+  const [stockInputVal, setStockInputVal] = useState(String(stock));
+
+  const handleStockInputSubmit = (e: React.FormEvent | React.FocusEvent) => {
+    e.preventDefault();
+    setIsEditingStock(false);
+    if (!onUpdateStock) return;
+    const num = parseInt(stockInputVal, 10);
+    if (!isNaN(num) && num >= 0) {
+      onUpdateStock(product.id, num);
+    } else {
+      setStockInputVal(String(stock));
+    }
+  };
 
   const priceResult = calculatePriceResult(
     product.numericPrice,
@@ -116,15 +131,40 @@ export const ProductCard: React.FC<ProductCardProps> = ({
       {/* Stock Bar & Counter */}
       <div className="mb-3 bg-slate-950/90 border border-slate-800/80 rounded-xl p-2 flex items-center justify-between text-xs">
         <div className="flex items-center gap-1.5">
-          <Package className={`w-3.5 h-3.5 ${isLowStock ? 'text-amber-400 animate-bounce' : 'text-slate-400'}`} />
-          <span className="text-slate-400 text-[11px]">موجودی انبار:</span>
-          <span className={`font-mono font-bold ${isLowStock ? 'text-amber-400' : 'text-slate-200'}`}>
-            {stock.toLocaleString('fa-IR')} عدد
-          </span>
-          {isLowStock && (
-            <span className="text-[9px] px-1.5 py-0.2 rounded bg-amber-950/80 border border-amber-800 text-amber-300 font-bold">
-              کسری
-            </span>
+          <Package className={`w-3.5 h-3.5 ${stock === 0 ? 'text-rose-400' : isLowStock ? 'text-amber-400' : 'text-slate-400'}`} />
+          <span className="text-slate-400 text-[11px]">موجودی:</span>
+          
+          {isEditingStock ? (
+            <form onSubmit={handleStockInputSubmit} className="inline-flex items-center" onClick={(e) => e.stopPropagation()}>
+              <input
+                type="number"
+                min="0"
+                autoFocus
+                value={stockInputVal}
+                onChange={(e) => setStockInputVal(e.target.value)}
+                onBlur={handleStockInputSubmit}
+                className="w-14 px-1 py-0.5 bg-slate-900 border border-purple-500 rounded text-center text-xs font-mono font-bold text-white focus:outline-none"
+              />
+            </form>
+          ) : (
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                setStockInputVal(String(stock));
+                setIsEditingStock(true);
+              }}
+              className={`font-mono font-bold px-1.5 py-0.5 rounded border transition-colors ${
+                stock === 0
+                  ? 'bg-rose-950/60 border-rose-800/60 text-rose-300 hover:border-rose-500'
+                  : isLowStock
+                  ? 'bg-amber-950/60 border-amber-800/60 text-amber-300 hover:border-amber-500'
+                  : 'bg-slate-900/80 border-slate-700/60 text-slate-200 hover:border-purple-500'
+              }`}
+              title="برای تغییر عدد موجودی کلیک کنید"
+            >
+              {stock === 0 ? 'ناموجود (۰)' : `${stock.toLocaleString('fa-IR')} عدد`}
+            </button>
           )}
         </div>
 

@@ -2,6 +2,7 @@ import React, { useState, useEffect, useMemo } from 'react';
 import initialProductsData from './data/products.json';
 import { Product, FilterState, BrandMarkupMap, CategoryMarkupMap, GoogleSheetsConfig, CurrencyMode } from './types';
 import { normalizePersianText, inferCategoryFromName, inferVehiclesFromName, calculateStoreAnalytics } from './utils/pricing';
+import { cleanSearchText, evaluateProductSearch } from './utils/search';
 import { Header } from './components/Header';
 import { SearchBar } from './components/SearchBar';
 import { ProductCard } from './components/ProductCard';
@@ -22,12 +23,19 @@ export default function App() {
     const saved = localStorage.getItem('yadak_products');
     if (saved) {
       try {
-        return JSON.parse(saved);
+        const parsed = JSON.parse(saved);
+        return parsed.map((p: Product) => ({
+          ...p,
+          stock: p.stock !== undefined ? p.stock : 0,
+        }));
       } catch (e) {
         console.error('Failed to parse saved products', e);
       }
     }
-    return initialProductsData as Product[];
+    return (initialProductsData as Product[]).map((p) => ({
+      ...p,
+      stock: p.stock !== undefined ? p.stock : 0,
+    }));
   });
 
   // Profit markup settings
@@ -158,72 +166,81 @@ export default function App() {
     return calculateStoreAnalytics(products, generalMarkup, brandMarkupMap, categoryMarkupMap);
   }, [products, generalMarkup, brandMarkupMap, categoryMarkupMap]);
 
-  // Filter & Sort products with high performance
+  // Filter & Sort products with high performance & smart multi-token search
   const filteredProducts = useMemo(() => {
-    const normalizedQuery = normalizePersianText(filters.query);
+    const rawQuery = cleanSearchText(filters.query);
+    const queryTokens = rawQuery ? rawQuery.split(/\s+/).filter(Boolean) : [];
 
-    return products
-      .filter((p) => {
-        // Brand filter
-        if (filters.selectedBrand && p.brand !== filters.selectedBrand) {
-          return false;
-        }
+    const matchesList: { product: Product; searchScore: number }[] = [];
 
-        // Category filter
-        const category = p.category || inferCategoryFromName(p.name);
-        if (filters.selectedCategory && category !== filters.selectedCategory) {
-          return false;
+    for (const p of products) {
+      // Vehicle filter
+      if (filters.selectedVehicle) {
+        const vehs = p.vehicles && p.vehicles.length > 0 ? p.vehicles : inferVehiclesFromName(p.name);
+        if (!vehs.includes(filters.selectedVehicle)) {
+          continue;
         }
+      }
 
-        // Low stock filter
-        if (filters.onlyLowStock) {
-          const stock = p.stock !== undefined ? p.stock : 10;
-          const minStock = p.minStock !== undefined ? p.minStock : 3;
-          if (stock > minStock) return false;
-        }
+      // Brand filter
+      if (filters.selectedBrand && p.brand !== filters.selectedBrand) {
+        continue;
+      }
 
-        // Query search matching name, brand, oemCode, barcode, vehicle or id
-        if (normalizedQuery) {
-          const normName = normalizePersianText(p.name);
-          const normBrand = normalizePersianText(p.brand);
-          const normOem = normalizePersianText(p.oemCode || '');
-          const normBarcode = normalizePersianText(p.barcode || '');
-          const idStr = String(p.id || '');
-          const vehiclesStr = normalizePersianText((p.vehicles || inferVehiclesFromName(p.name)).join(' '));
+      // Category filter
+      const category = p.category || inferCategoryFromName(p.name);
+      if (filters.selectedCategory && category !== filters.selectedCategory) {
+        continue;
+      }
 
-          const matches =
-            normName.includes(normalizedQuery) ||
-            normBrand.includes(normalizedQuery) ||
-            normOem.includes(normalizedQuery) ||
-            normBarcode.includes(normalizedQuery) ||
-            vehiclesStr.includes(normalizedQuery) ||
-            idStr === normalizedQuery;
+      // Low stock filter
+      if (filters.onlyLowStock) {
+        const stock = p.stock !== undefined ? p.stock : 10;
+        const minStock = p.minStock !== undefined ? p.minStock : 3;
+        if (stock > minStock) continue;
+      }
 
-          if (!matches) return false;
-        }
+      // Smart Query search matching
+      if (queryTokens.length > 0) {
+        const { matches, score } = evaluateProductSearch(p, queryTokens);
+        if (!matches) continue;
+        matchesList.push({ product: p, searchScore: score });
+      } else {
+        matchesList.push({ product: p, searchScore: 0 });
+      }
+    }
 
-        return true;
-      })
-      .sort((a, b) => {
-        if (filters.sortOrder === 'PRICE_ASC') {
-          return a.numericPrice - b.numericPrice;
+    // Sort matching products
+    matchesList.sort((a, b) => {
+      // If user searched with a query and default sort order is active, sort by relevance score
+      if (queryTokens.length > 0 && filters.sortOrder === 'NAME_ASC') {
+        if (b.searchScore !== a.searchScore) {
+          return b.searchScore - a.searchScore; // Highest relevance score first
         }
-        if (filters.sortOrder === 'PRICE_DESC') {
-          return b.numericPrice - a.numericPrice;
-        }
-        if (filters.sortOrder === 'STOCK_ASC') {
-          const stockA = a.stock !== undefined ? a.stock : 10;
-          const stockB = b.stock !== undefined ? b.stock : 10;
-          return stockA - stockB;
-        }
-        if (filters.sortOrder === 'STOCK_DESC') {
-          const stockA = a.stock !== undefined ? a.stock : 10;
-          const stockB = b.stock !== undefined ? b.stock : 10;
-          return stockB - stockA;
-        }
-        // Default NAME_ASC
-        return a.name.localeCompare(b.name, 'fa');
-      });
+      }
+
+      if (filters.sortOrder === 'PRICE_ASC') {
+        return a.product.numericPrice - b.product.numericPrice;
+      }
+      if (filters.sortOrder === 'PRICE_DESC') {
+        return b.product.numericPrice - a.product.numericPrice;
+      }
+      if (filters.sortOrder === 'STOCK_ASC') {
+        const stockA = a.product.stock !== undefined ? a.product.stock : 10;
+        const stockB = b.product.stock !== undefined ? b.product.stock : 10;
+        return stockA - stockB;
+      }
+      if (filters.sortOrder === 'STOCK_DESC') {
+        const stockA = a.product.stock !== undefined ? a.product.stock : 10;
+        const stockB = b.product.stock !== undefined ? b.product.stock : 10;
+        return stockB - stockA;
+      }
+
+      // Default NAME_ASC
+      return a.product.name.localeCompare(b.product.name, 'fa');
+    });
+
+    return matchesList.map((m) => m.product);
   }, [products, filters]);
 
   // Products to render based on pagination limit
@@ -303,37 +320,40 @@ export default function App() {
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col font-sans selection:bg-purple-500 selection:text-white antialiased">
       
-      {/* Header */}
-      <Header
-        totalCount={products.length}
-        filteredCount={filteredProducts.length}
-        lowStockCount={analytics.lowStockCount}
-        currencyMode={currencyMode}
-        onToggleCurrency={handleToggleCurrency}
-        onOpenScanner={() => setIsScannerOpen(true)}
-        onOpenCsvModal={() => setIsCsvModalOpen(true)}
-        onOpenSheetsModal={() => setIsSheetsModalOpen(true)}
-        onOpenPricingModal={() => setIsPricingModalOpen(true)}
-        onOpenAnalyticsModal={() => setIsAnalyticsModalOpen(true)}
-        onOpenAddModal={() => setIsAddModalOpen(true)}
-        generalMarkup={generalMarkup}
-      />
+      {/* Sticky Header & Search/Filter Section */}
+      <div className="sticky top-0 z-40 bg-slate-950/95 backdrop-blur-md border-b border-slate-800/80 shadow-2xl">
+        <Header
+          totalCount={products.length}
+          filteredCount={filteredProducts.length}
+          lowStockCount={analytics.lowStockCount}
+          currencyMode={currencyMode}
+          onToggleCurrency={handleToggleCurrency}
+          onOpenScanner={() => setIsScannerOpen(true)}
+          onOpenCsvModal={() => setIsCsvModalOpen(true)}
+          onOpenSheetsModal={() => setIsSheetsModalOpen(true)}
+          onOpenPricingModal={() => setIsPricingModalOpen(true)}
+          onOpenAnalyticsModal={() => setIsAnalyticsModalOpen(true)}
+          onOpenAddModal={() => setIsAddModalOpen(true)}
+          generalMarkup={generalMarkup}
+        />
+
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-2.5">
+          <SearchBar
+            filters={filters}
+            onChange={(newFilters) => {
+              setFilters(newFilters);
+              setVisibleCount(ITEMS_PER_PAGE); // Reset pagination on filter change
+            }}
+            brands={uniqueBrands}
+            categories={uniqueCategories}
+            vehicles={uniqueVehicles}
+            totalResults={filteredProducts.length}
+          />
+        </div>
+      </div>
 
       {/* Main Content Area */}
       <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-6">
-        
-        {/* Search & Filter Toolbar */}
-        <SearchBar
-          filters={filters}
-          onChange={(newFilters) => {
-            setFilters(newFilters);
-            setVisibleCount(ITEMS_PER_PAGE); // Reset pagination on filter change
-          }}
-          brands={uniqueBrands}
-          categories={uniqueCategories}
-          vehicles={uniqueVehicles}
-          totalResults={filteredProducts.length}
-        />
 
         {/* Product Cards Grid */}
         {filteredProducts.length === 0 ? (
@@ -465,6 +485,9 @@ export default function App() {
         currencyMode={currencyMode}
         onToggleCurrency={handleToggleCurrency}
         onSelectProduct={(p) => setSelectedProduct(p)}
+        onResetAllStock={() => {
+          setProducts((prev) => prev.map((p) => ({ ...p, stock: 0 })));
+        }}
       />
 
       <AddProductModal

@@ -8,13 +8,15 @@ interface CsvImportModalProps {
   isOpen: boolean;
   onClose: () => void;
   existingProducts: Product[];
-  onImportComplete: (newProducts: Product[], duplicatesToUpdate: any[]) => void;
+  onImport?: (newProducts: Product[], duplicatesToUpdate: any[]) => void;
+  onImportComplete?: (newProducts: Product[], duplicatesToUpdate: any[]) => void;
 }
 
 export const CsvImportModal: React.FC<CsvImportModalProps> = ({
   isOpen,
   onClose,
   existingProducts,
+  onImport,
   onImportComplete,
 }) => {
   if (!isOpen) return null;
@@ -22,12 +24,14 @@ export const CsvImportModal: React.FC<CsvImportModalProps> = ({
   const [preview, setPreview] = useState<CsvPreview | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [updateDuplicates, setUpdateDuplicates] = useState(true);
+  const [importedSuccess, setImportedSuccess] = useState(false);
 
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
 
     setError(null);
+    setImportedSuccess(false);
     const reader = new FileReader();
 
     reader.onload = (event) => {
@@ -35,6 +39,9 @@ export const CsvImportModal: React.FC<CsvImportModalProps> = ({
         const text = event.target?.result as string;
         const result = processCsvUpload(text, file.name, existingProducts);
         setPreview(result);
+        if (result.newProducts.length === 0 && result.duplicateMatches.length === 0) {
+          setError('هیچ کالای معتبری در فایل شناسایی نشد. لطفاً ساختار فایل و جداکننده (کاما یا سیمیکالن) را بررسی کنید.');
+        }
       } catch (err) {
         setError('خطا در خواندن فایل CSV. لطفاً ساختار فایل را بررسی کنید.');
       }
@@ -45,11 +52,19 @@ export const CsvImportModal: React.FC<CsvImportModalProps> = ({
 
   const handleApplyImport = () => {
     if (!preview) return;
-    onImportComplete(
-      preview.newProducts,
-      updateDuplicates ? preview.duplicateMatches : []
-    );
-    onClose();
+    const importFn = onImportComplete || onImport;
+    if (importFn) {
+      importFn(
+        preview.newProducts,
+        updateDuplicates ? preview.duplicateMatches : []
+      );
+    }
+    setImportedSuccess(true);
+    setTimeout(() => {
+      onClose();
+      setPreview(null);
+      setImportedSuccess(false);
+    }, 800);
   };
 
   return (
@@ -174,13 +189,23 @@ export const CsvImportModal: React.FC<CsvImportModalProps> = ({
             </div>
           )}
 
+          {importedSuccess && (
+            <div className="p-3.5 bg-emerald-950/60 border border-emerald-800/60 rounded-xl text-emerald-200 text-xs font-bold flex items-center gap-2 animate-fade-in">
+              <CheckCircle className="w-5 h-5 text-emerald-400" />
+              <span>فایل با موفقیت وارد انبار گردید و لیست به‌روزرسانی شد.</span>
+            </div>
+          )}
+
         </div>
 
         {/* Modal Footer */}
-        {preview && (
+        {preview && !importedSuccess && (
           <div className="pt-4 border-t border-slate-800 flex items-center justify-between shrink-0">
             <button
-              onClick={() => setPreview(null)}
+              onClick={() => {
+                setPreview(null);
+                setError(null);
+              }}
               className="px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-medium"
             >
               انتخاب فایل دیگر

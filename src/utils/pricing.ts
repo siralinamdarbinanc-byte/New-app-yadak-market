@@ -158,7 +158,7 @@ export function calculateStoreAnalytics(
   const brandsSet = new Set<string>();
 
   products.forEach((p) => {
-    const stock = p.stock !== undefined ? p.stock : 10;
+    const stock = p.stock !== undefined ? p.stock : 0;
     const minStock = p.minStock !== undefined ? p.minStock : 3;
 
     if (stock <= minStock) {

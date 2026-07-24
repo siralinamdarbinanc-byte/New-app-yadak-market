@@ -37,7 +37,7 @@ export const ProductModal: React.FC<ProductModalProps> = ({
   const [editBarcode, setEditBarcode] = useState(product.barcode || '');
   const [editCategory, setEditCategory] = useState(product.category || inferCategoryFromName(product.name));
   const [editLocation, setEditLocation] = useState(product.location || 'قفسه عمومی');
-  const [editStock, setEditStock] = useState(product.stock !== undefined ? product.stock : 10);
+  const [editStock, setEditStock] = useState(product.stock !== undefined ? product.stock : 0);
   const [editMinStock, setEditMinStock] = useState(product.minStock !== undefined ? product.minStock : 3);
   const [editVehicles, setEditVehicles] = useState(
     (product.vehicles && product.vehicles.length > 0 ? product.vehicles : inferVehiclesFromName(product.name)).join('، ')
