@@ -77,10 +77,15 @@ export default function App() {
     const saved = localStorage.getItem('yadak_sheets_config');
     if (saved) {
       try {
-        return JSON.parse(saved);
+        const parsed = JSON.parse(saved);
+        if (parsed.sheetUrl) return parsed;
       } catch (e) {}
     }
-    return { sheetUrl: 'https://script.google.com/macros/s/AKfycbyVX6Ag_ed6kb0kyo5r9TJaSWKUTGXY4EExh0iNW85okhG_RMr2Xu7LYVXDIWyT8wKE/exec', autoSync: false, lastSync: null, scriptUrl: 'https://script.google.com/macros/s/AKfycbyVX6Ag_ed6kb0kyo5r9TJaSWKUTGXY4EExh0iNW85okhG_RMr2Xu7LYVXDIWyT8wKE/exec' };
+    return {
+      sheetUrl: 'https://script.google.com/macros/s/AKfycbyVX6Ag_ed6kb0kyo5r9TJaSWKUTGXY4EExh0iNW85okhG_RMr2Xu7LYVXDIWyT8wKE/exec',
+      autoSync: false,
+      lastSync: null,
+    };
   });
 
   // Font Size Customization State
@@ -331,19 +336,26 @@ export default function App() {
 
     // Update duplicates if requested
     if (duplicatesToUpdate && duplicatesToUpdate.length > 0) {
-      const dupeMap = new Map();
+      const dupeMap = new Map<string, any>();
       duplicatesToUpdate.forEach((d) => {
-        dupeMap.set(`${d.name}_${d.brand}`, d.newPriceNumeric);
+        dupeMap.set(`${d.name}_${d.brand}`, d);
       });
 
       updatedList = updatedList.map((p) => {
         const key = `${p.name}_${p.brand}`;
         if (dupeMap.has(key)) {
-          const newNumeric = dupeMap.get(key);
+          const d = dupeMap.get(key);
+          const newNumeric = d.newPriceNumeric !== undefined ? d.newPriceNumeric : (typeof d === 'number' ? d : p.numericPrice);
+          const newLoc = d.newProduct?.location || p.location;
+          const newStock = d.newProduct?.stock !== undefined ? d.newProduct.stock : p.stock;
+          const newOem = d.newProduct?.oemCode || p.oemCode;
           return {
             ...p,
             numericPrice: newNumeric,
             price: String(newNumeric),
+            location: newLoc,
+            stock: newStock,
+            oemCode: newOem,
             lastUpdate: new Date().toLocaleDateString('fa-IR'),
           };
         }
@@ -507,6 +519,7 @@ export default function App() {
         onClose={() => setIsCsvModalOpen(false)}
         existingProducts={products}
         onImport={handleImportCsv}
+        onRestoreBackup={(backupProducts) => setProducts(backupProducts)}
       />
 
       <GoogleSheetsModal
