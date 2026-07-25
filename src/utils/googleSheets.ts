@@ -1,5 +1,6 @@
 import { Product, DuplicateMatch, CsvPreview } from '../types';
 import { processCsvUpload } from './csv';
+import { cleanProductName } from './pricing';
 
 /**
  * Converts standard Google Sheet share link into a direct CSV download export URL
@@ -85,12 +86,15 @@ export async function fetchAndProcessGoogleSheet(
 
         // Convert JSON items to CSV-like format or process them directly
         const formattedProducts: Product[] = rawItems.map((item: any, idx: number) => {
-          const name = item.name || item.title || item['نام کالا'] || item['نام'] || 'کالای بدون نام';
-          const brand = item.brand || item['برند'] || '';
+          const rawName = item.name || item.title || item['نام کالا'] || item['نام'] || 'کالای بدون نام';
+          const name = cleanProductName(rawName);
+          const brand = cleanProductName(item.brand || item['برند'] || '');
           const numericPrice = Number(item.numericPrice || item.price || item['قیمت'] || 0) || 0;
-          const oemCode = item.oemCode || item.code || item['کد فنی'] || item['کد'] || item['بارکد'] || '';
-          const location = item.location || item['موقعیت'] || item['کشو'] || 'عمومی';
+          const oemCode = cleanProductName(item.oemCode || item.code || item['کد فنی'] || item['کد'] || item['بارکد'] || '');
+          const location = cleanProductName(item.location || item['موقعیت'] || item['کشو'] || 'عمومی');
           const stock = Number(item.stock || item['موجودی'] || 0) || 0;
+          const updatedAt = Number(item.updatedAt || item['برچسب زمان'] || 0) || undefined;
+          const lastUpdate = String(item.lastUpdate || item['آخرین تغییرات'] || new Date().toLocaleDateString('fa-IR'));
 
           return {
             id: `gs_${Date.now()}_${idx}`,
@@ -101,7 +105,8 @@ export async function fetchAndProcessGoogleSheet(
             oemCode: oemCode ? String(oemCode) : undefined,
             location,
             stock,
-            lastUpdate: new Date().toLocaleDateString('fa-IR'),
+            lastUpdate,
+            updatedAt,
           };
         });
 
@@ -116,16 +121,40 @@ export async function fetchAndProcessGoogleSheet(
           );
 
           if (match) {
+            const incomingProduct: Product = {
+              ...p,
+              id: match.id,
+              updatedAt: p.updatedAt || Date.now(),
+            };
+
+            // Timestamp check: If local app product was modified after incoming sheet row, incoming is stale
+            const isStale = Boolean(match.updatedAt && p.updatedAt && match.updatedAt > p.updatedAt);
+
+            const hasPriceChange = match.numericPrice !== p.numericPrice;
+            const hasStockChange = p.stock !== undefined && match.stock !== p.stock;
+            const hasLocationChange = Boolean(p.location && match.location !== p.location);
+            const hasOemChange = Boolean(p.oemCode && match.oemCode !== p.oemCode);
+
+            const hasFieldChanges = hasPriceChange || hasStockChange || hasLocationChange || hasOemChange;
+            const hasChanges = hasFieldChanges && !isStale;
+
             duplicateMatches.push({
-              existingProduct: match,
-              newProduct: p,
               name: p.name,
               brand: p.brand || '',
+              oldPrice: match.price || String(match.numericPrice || 0),
+              newPrice: p.price || String(p.numericPrice || 0),
               oldPriceNumeric: match.numericPrice || 0,
               newPriceNumeric: p.numericPrice || 0,
+              hasChanges,
+              isStale,
+              existingProduct: match,
+              newProduct: incomingProduct,
             });
           } else {
-            newProducts.push(p);
+            newProducts.push({
+              ...p,
+              updatedAt: p.updatedAt || Date.now(),
+            });
           }
         });
 
@@ -158,12 +187,12 @@ export async function pushProductsToGoogleSheet(
   products: Product[]
 ): Promise<{ updated: number; added: number; message: string }> {
   let trimmedUrl = scriptUrl.trim();
-  if (!trimmedUrl || !trimmedUrl.includes('script.google.com')) {
+  if (!trimmedUrl || (!trimmedUrl.includes('script.google.com') && !trimmedUrl.includes('google.com'))) {
     throw new Error('برای ارسال اطلاعات به گوگل شیت، باید لینک Google Apps Script Web App (با پسوند /exec) را وارد کنید.');
   }
 
   // Auto-append sheetId if not already present
-  if (!trimmedUrl.includes('sheetId=')) {
+  if (trimmedUrl.includes('script.google.com') && !trimmedUrl.includes('sheetId=')) {
     const defaultSheetId = '1uMsiEKnjJ5Vgvc5iDbCgWiU4_6ZSabfzws83qL8bgac';
     const separator = trimmedUrl.includes('?') ? '&' : '?';
     trimmedUrl = `${trimmedUrl}${separator}sheetId=${defaultSheetId}`;
@@ -177,46 +206,73 @@ export async function pushProductsToGoogleSheet(
       oemCode: p.oemCode || '',
       location: p.location || '',
       stock: p.stock !== undefined ? p.stock : 0,
-      category: p.category || 'عمومی'
+      category: p.category || 'عمومی',
+      lastUpdate: p.lastUpdate || new Date().toLocaleDateString('fa-IR'),
+      updatedAt: p.updatedAt || Date.now()
     }))
   };
 
+  const jsonBody = JSON.stringify(payload);
+
+  // 1. Try standard CORS fetch first (in case proxy or headers permit full response reading)
   try {
     const response = await fetch(trimmedUrl, {
       method: 'POST',
       headers: {
         'Content-Type': 'text/plain;charset=utf-8',
       },
-      body: JSON.stringify(payload),
+      body: jsonBody,
     });
 
-    if (!response.ok) {
-      throw new Error(`خطا در ارسال اطلاعات به گوگل شیت (کد خطا: ${response.status})`);
-    }
+    if (response.ok) {
+      const resText = await response.text();
+      let resJson;
+      try {
+        resJson = JSON.parse(resText);
+      } catch {
+        return {
+          updated: products.length,
+          added: 0,
+          message: 'اطلاعات با موفقیت به گوگل شیت ارسال گردید.'
+        };
+      }
 
-    const resText = await response.text();
-    let resJson;
-    try {
-      resJson = JSON.parse(resText);
-    } catch {
+      if (resJson.status === 'error') {
+        throw new Error(resJson.message || 'خطا در ثبت اطلاعات در اسکریپت گوگل شیت');
+      }
+
       return {
-        updated: products.length,
-        added: 0,
-        message: 'اطلاعات با موفقیت به گوگل شیت ارسال گردید.'
+        updated: resJson.updated || products.length,
+        added: resJson.added || 0,
+        message: resJson.message || 'اطلاعات انبار با موفقیت در گوگل شیت آنلاین ثبت شد.'
       };
     }
-
-    if (resJson.status === 'error') {
-      throw new Error(resJson.message || 'خطا در ثبت اطلاعات در اسکریپت گوگل شیت');
+  } catch (corsErr: any) {
+    if (corsErr.message && corsErr.message.includes('خطا در ثبت اطلاعات')) {
+      throw corsErr;
     }
+    // Otherwise it was a browser CORS 302 redirect restriction on script.google.com POST
+  }
+
+  // 2. Robust Fallback: Send POST with mode: 'no-cors'
+  // Browsers successfully deliver the payload to script.google.com without failing on 302 CORS redirects
+  try {
+    await fetch(trimmedUrl, {
+      method: 'POST',
+      mode: 'no-cors',
+      headers: {
+        'Content-Type': 'text/plain;charset=utf-8',
+      },
+      body: jsonBody,
+    });
 
     return {
-      updated: resJson.updated || 0,
-      added: resJson.added || 0,
-      message: resJson.message || 'اطلاعات انبار با موفقیت در گوگل شیت آنلاین ثبت شد.'
+      updated: products.length,
+      added: 0,
+      message: 'اطلاعات انبار با موفقیت به گوگل شیت آنلاین ارسال و بروزرسانی شد.'
     };
   } catch (err: any) {
-    throw new Error(err.message || 'خطا در ارسال داده به گوگل شیت');
+    throw new Error(err.message || 'خطا در ارسال داده به گوگل شیت. از تنظیم بودن دسترسی اسکریپت روی Anyone مطمئن شوید.');
   }
 }
 

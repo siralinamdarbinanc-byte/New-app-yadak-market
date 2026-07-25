@@ -73,7 +73,9 @@ function doGet(e) {
         oemCode: String(row[4] || ''),
         location: String(row[5] || ''),
         stock: Number(row[6] || 0),
-        category: String(row[7] || 'عمومی')
+        category: String(row[7] || 'عمومی'),
+        lastUpdate: String(row[8] || ''),
+        updatedAt: Number(row[9] || 0)
       });
     }
     
@@ -98,7 +100,7 @@ function doPost(e) {
     
     var data = sheet.getDataRange().getValues();
     if (data.length === 0) {
-      sheet.appendRow(['ردیف', 'نام کالا', 'برند', 'قیمت پایه (ریال)', 'کد فنی / بارکد', 'موقعیت انبار / کشو', 'موجودی (عدد)', 'دسته بندی', 'آخرین تغییرات']);
+      sheet.appendRow(['ردیف', 'نام کالا', 'برند', 'قیمت پایه (ریال)', 'کد فنی / بارکد', 'موقعیت انبار / کشو', 'موجودی (عدد)', 'دسته بندی', 'آخرین تغییرات', 'برچسب زمان']);
       data = sheet.getDataRange().getValues();
     }
     
@@ -119,7 +121,8 @@ function doPost(e) {
         }
       }
       
-      var nowStr = new Date().toLocaleDateString('fa-IR');
+      var nowStr = item.lastUpdate || new Date().toLocaleDateString('fa-IR');
+      var timestamp = item.updatedAt || Date.now();
       
       if (foundRow > 0) {
         sheet.getRange(foundRow, 4).setValue(item.numericPrice || item.price || 0);
@@ -127,6 +130,7 @@ function doPost(e) {
         if (item.location) sheet.getRange(foundRow, 6).setValue(item.location);
         if (item.stock !== undefined) sheet.getRange(foundRow, 7).setValue(item.stock);
         sheet.getRange(foundRow, 9).setValue(nowStr);
+        sheet.getRange(foundRow, 10).setValue(timestamp);
         updatedCount++;
       } else {
         sheet.appendRow([
@@ -138,7 +142,8 @@ function doPost(e) {
           item.location || 'عمومی',
           item.stock || 0,
           item.category || 'عمومی',
-          nowStr
+          nowStr,
+          timestamp
         ]);
         addedCount++;
       }
@@ -167,6 +172,8 @@ interface GoogleSheetsModalProps {
   config: GoogleSheetsConfig;
   onSaveConfig: (newConfig: GoogleSheetsConfig) => void;
   existingProducts: Product[];
+  pendingChanges: Product[];
+  onClearPendingChanges: () => void;
   onApplySync: (newProducts: Product[], duplicatesToUpdate: any[]) => void;
 }
 
@@ -176,6 +183,8 @@ export const GoogleSheetsModal: React.FC<GoogleSheetsModalProps> = ({
   config,
   onSaveConfig,
   existingProducts,
+  pendingChanges,
+  onClearPendingChanges,
   onApplySync,
 }) => {
   if (!isOpen) return null;
@@ -191,6 +200,7 @@ export const GoogleSheetsModal: React.FC<GoogleSheetsModalProps> = ({
   const [copiedScript, setCopiedScript] = useState(false);
   const [syncedSuccess, setSyncedSuccess] = useState(false);
   const [updateDuplicates, setUpdateDuplicates] = useState(true);
+  const [pushScope, setPushScope] = useState<'PENDING' | 'ALL'>('PENDING');
 
   const handleCopyScript = () => {
     navigator.clipboard.writeText(GOOGLE_APPS_SCRIPT_CODE);
@@ -233,14 +243,33 @@ export const GoogleSheetsModal: React.FC<GoogleSheetsModalProps> = ({
       return;
     }
 
+    const isSendingPending = pushScope === 'PENDING' && pendingChanges.length > 0;
+    const targetProducts = isSendingPending ? pendingChanges : existingProducts;
+
+    if (targetProducts.length === 0) {
+      setErrorMsg('هیچ کالایی برای ارسال وجود ندارد.');
+      return;
+    }
+
     setPushLoading(true);
     setErrorMsg('');
     setPreview(null);
     setPushResult(null);
 
     try {
-      const res = await pushProductsToGoogleSheet(sheetUrlInput, existingProducts);
-      setPushResult(res);
+      const res = await pushProductsToGoogleSheet(sheetUrlInput, targetProducts);
+      
+      if (isSendingPending) {
+        onClearPendingChanges();
+      }
+
+      setPushResult({
+        ...res,
+        message: isSendingPending
+          ? `تعداد ${formatPersianNumber(targetProducts.length)} کالا/تغییر به گوگل شیت ارسال و حافظه موقت پاک شد.`
+          : res.message,
+      });
+
       onSaveConfig({
         sheetUrl: sheetUrlInput,
         autoSync,
@@ -253,9 +282,13 @@ export const GoogleSheetsModal: React.FC<GoogleSheetsModalProps> = ({
     }
   };
 
+  const modifiedDuplicates = preview ? preview.duplicateMatches.filter((m) => m.hasChanges && !m.isStale) : [];
+  const staleDuplicatesCount = preview ? preview.duplicateMatches.filter((m) => m.isStale).length : 0;
+  const unchangedDuplicatesCount = preview ? preview.duplicateMatches.filter((m) => !m.hasChanges && !m.isStale).length : 0;
+
   const handleConfirmSync = () => {
     if (!preview) return;
-    const dupesToPass = updateDuplicates ? preview.duplicateMatches : [];
+    const dupesToPass = updateDuplicates ? modifiedDuplicates : [];
     onApplySync(preview.newProducts, dupesToPass);
     setSyncedSuccess(true);
     setTimeout(() => {
@@ -264,7 +297,7 @@ export const GoogleSheetsModal: React.FC<GoogleSheetsModalProps> = ({
     }, 1500);
   };
 
-  const hasUpdates = preview ? (preview.newProducts.length > 0 || (updateDuplicates && preview.duplicateMatches.length > 0)) : false;
+  const hasUpdates = preview ? (preview.newProducts.length > 0 || (updateDuplicates && modifiedDuplicates.length > 0)) : false;
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/85 backdrop-blur-md animate-fade-in">
@@ -293,6 +326,108 @@ export const GoogleSheetsModal: React.FC<GoogleSheetsModalProps> = ({
         {/* Content Body */}
         <div className="py-5 overflow-y-auto space-y-4 flex-1">
           
+          {/* Auto Sync Toggle Box */}
+          <div className="bg-emerald-950/40 border border-emerald-800/60 rounded-2xl p-4 flex items-center justify-between gap-3">
+            <div className="space-y-1">
+              <div className="flex items-center gap-2">
+                <RefreshCw className={`w-4 h-4 text-emerald-400 ${autoSync ? 'animate-spin' : ''}`} style={{ animationDuration: '6s' }} />
+                <span className="text-xs font-bold text-emerald-200">همگام‌سازی ۲ طرفه خودکار (ارسال تغییرات + دریافت هر ۱ دقیقه)</span>
+              </div>
+              <p className="text-[11px] text-slate-300 leading-relaxed">
+                با فعال بودن این گزینه، هرگونه تغییر جدید محلی بلافاصله به گوگل شیت ارسال شده و تغییرات سایر دستگاه‌ها نیز هر ۶۰ ثانیه به صورت خودکار چک و دریافت می‌شود.
+              </p>
+            </div>
+            <label className="relative inline-flex items-center cursor-pointer shrink-0">
+              <input
+                type="checkbox"
+                checked={autoSync}
+                onChange={(e) => {
+                  const val = e.target.checked;
+                  setAutoSync(val);
+                  onSaveConfig({
+                    sheetUrl: sheetUrlInput,
+                    autoSync: val,
+                    lastSync: config.lastSync,
+                  });
+                }}
+                className="sr-only peer"
+              />
+              <div className="w-11 h-6 bg-slate-800 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full rtl:peer-checked:after:-translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:start-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-emerald-500"></div>
+            </label>
+          </div>
+
+          {/* Pending Changes Memory Queue Banner */}
+
+          <div className="bg-slate-950 border border-purple-900/40 rounded-2xl p-4 space-y-3">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <div className="w-2.5 h-2.5 rounded-full bg-purple-400 animate-pulse" />
+                <span className="text-xs font-bold text-purple-200">حافظه موقت تغییرات اخیر انبار:</span>
+              </div>
+              {pendingChanges.length > 0 && (
+                <button
+                  type="button"
+                  onClick={onClearPendingChanges}
+                  className="text-[11px] text-slate-400 hover:text-rose-400 transition-colors underline"
+                >
+                  پاک‌سازی حافظه موقت
+                </button>
+              )}
+            </div>
+
+            <div className="flex items-center justify-between bg-slate-900/80 p-3 rounded-xl border border-slate-800">
+              <span className="text-xs text-slate-300">
+                {pendingChanges.length > 0 ? (
+                  <>تعداد <strong className="text-purple-300 font-bold font-mono text-sm px-1">{formatPersianNumber(pendingChanges.length)}</strong> کالا ویرایش/افزوده شده در انتظار ارسال</>
+                ) : (
+                  <span className="text-slate-400">هیچ تغییر جدیدی در حافظه موقت ثبت نشده است (تمام تغییرات قبلی ارسال شده‌اند).</span>
+                )}
+              </span>
+              <span className="text-[10px] px-2 py-0.5 rounded-full bg-purple-950 border border-purple-800/60 text-purple-300">
+                {pendingChanges.length > 0 ? 'حالت سبک & سریع' : 'انبار به‌روز'}
+              </span>
+            </div>
+
+            {/* Scope Selection Controls */}
+            <div className="grid grid-cols-2 gap-2 text-xs pt-1">
+              <button
+                type="button"
+                onClick={() => setPushScope('PENDING')}
+                className={`p-2.5 rounded-xl border text-right transition-all flex flex-col gap-1 ${
+                  pushScope === 'PENDING'
+                    ? 'bg-purple-950/60 border-purple-500/80 text-purple-200 ring-1 ring-purple-500/30'
+                    : 'bg-slate-900/50 border-slate-800 text-slate-400 hover:bg-slate-900'
+                }`}
+              >
+                <div className="font-bold flex items-center gap-1.5 text-xs">
+                  <span className={`w-2 h-2 rounded-full ${pushScope === 'PENDING' ? 'bg-purple-400' : 'bg-slate-600'}`} />
+                  <span>فقط ارسال تغییرات جدید</span>
+                </div>
+                <span className="text-[10px] text-slate-400 font-mono">
+                  ({pendingChanges.length > 0 ? formatPersianNumber(pendingChanges.length) : formatPersianNumber(existingProducts.length)} کالا - سریع)
+                </span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setPushScope('ALL')}
+                className={`p-2.5 rounded-xl border text-right transition-all flex flex-col gap-1 ${
+                  pushScope === 'ALL'
+                    ? 'bg-blue-950/60 border-blue-500/80 text-blue-200 ring-1 ring-blue-500/30'
+                    : 'bg-slate-900/50 border-slate-800 text-slate-400 hover:bg-slate-900'
+                }`}
+              >
+                <div className="font-bold flex items-center gap-1.5 text-xs">
+                  <span className={`w-2 h-2 rounded-full ${pushScope === 'ALL' ? 'bg-blue-400' : 'bg-slate-600'}`} />
+                  <span>ارسال کامل کل انبار</span>
+                </div>
+                <span className="text-[10px] text-slate-400 font-mono">
+                  ({formatPersianNumber(existingProducts.length)} کالا - تمام کل کالاها)
+                </span>
+              </button>
+            </div>
+          </div>
+
           {/* Input box & Dual Actions (Download vs Upload) */}
           <div className="space-y-3.5 bg-slate-950 border border-slate-800 rounded-2xl p-4">
             <label className="block text-xs font-bold text-slate-200">
@@ -323,7 +458,13 @@ export const GoogleSheetsModal: React.FC<GoogleSheetsModalProps> = ({
                 className="px-4 py-2.5 bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white text-xs font-bold rounded-xl flex items-center justify-center gap-2 transition-colors shadow-lg shadow-blue-600/20"
               >
                 <Upload className={`w-4 h-4 ${pushLoading ? 'animate-bounce' : ''}`} />
-                <span>{pushLoading ? 'در حال ارسال به شیت...' : 'ارسال تغییرات اپ به گوگل شیت'}</span>
+                <span>
+                  {pushLoading
+                    ? 'در حال ارسال...'
+                    : pushScope === 'PENDING' && pendingChanges.length > 0
+                      ? `ارسال ${formatPersianNumber(pendingChanges.length)} تغییر جدید به شیت`
+                      : `ارسال کل انبار (${formatPersianNumber(existingProducts.length)} کالا)`}
+                </span>
               </button>
             </div>
 
@@ -395,10 +536,10 @@ export const GoogleSheetsModal: React.FC<GoogleSheetsModalProps> = ({
                   </div>
 
                   <p className="text-xs text-slate-300 leading-relaxed">
-                    با بررسی لینک گوگل شیت، تغییرات زیر نسبت به انبار فعلی شما شناسایی گردید. آیا می‌خواهید انبار را با این اطلاعات به روز رسانی کنید؟
+                    سیستم به‌صورت هوشمند تفاوت‌های گوگل شیت با انبار فعلی را محاسبه نمود. تنها موارد دارای تغییر یا کالاهای جدید به‌روزرسانی خواهند شد:
                   </p>
 
-                  <div className="grid grid-cols-2 gap-3 text-xs">
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5 text-xs">
                     <div className="p-3 bg-slate-900/90 border border-slate-800 rounded-xl">
                       <span className="text-slate-400 block mb-1">اقلام جدید آماده افزودن:</span>
                       <strong className="text-emerald-300 font-mono text-base">
@@ -407,15 +548,32 @@ export const GoogleSheetsModal: React.FC<GoogleSheetsModalProps> = ({
                     </div>
 
                     <div className="p-3 bg-slate-900/90 border border-slate-800 rounded-xl">
-                      <span className="text-slate-400 block mb-1">اقلام موجود جهت بروزرسانی قیمت/اطلاعات:</span>
+                      <span className="text-slate-400 block mb-1">اقلام دارای تغییر اطلاعات:</span>
                       <strong className="text-amber-300 font-mono text-base">
-                        {formatPersianNumber(preview.duplicateMatches.length)} کالا
+                        {formatPersianNumber(modifiedDuplicates.length)} کالا
+                      </strong>
+                    </div>
+
+                    <div className="p-3 bg-slate-900/90 border border-slate-800 rounded-xl">
+                      <span className="text-slate-400 block mb-1">بدون تغییر (رد شد):</span>
+                      <strong className="text-slate-400 font-mono text-base">
+                        {formatPersianNumber(unchangedDuplicatesCount)} کالا
                       </strong>
                     </div>
                   </div>
 
+                  {/* Stale items timestamp protection alert */}
+                  {staleDuplicatesCount > 0 && (
+                    <div className="bg-sky-950/60 border border-sky-800/60 p-3 rounded-xl flex items-center gap-2.5 text-xs text-sky-200">
+                      <ShieldCheck className="w-5 h-5 text-sky-400 shrink-0" />
+                      <span>
+                        سیستم به صورت خودکار از جایگزینی <strong className="font-mono text-sky-300 px-1 font-bold">{formatPersianNumber(staleDuplicatesCount)}</strong> کالا که ویرایش محلی آن‌ها جدیدتر از شیت بوده جلوگیری کرد تا اطلاعات انبار شما خراب نشود.
+                      </span>
+                    </div>
+                  )}
+
                   {/* Option to include/exclude updating existing items */}
-                  {preview.duplicateMatches.length > 0 && (
+                  {modifiedDuplicates.length > 0 && (
                     <div className="bg-slate-900/80 p-3 rounded-xl border border-slate-800">
                       <label className="flex items-center gap-2.5 cursor-pointer text-xs">
                         <input
@@ -425,20 +583,20 @@ export const GoogleSheetsModal: React.FC<GoogleSheetsModalProps> = ({
                           className="w-4 h-4 accent-emerald-500 rounded"
                         />
                         <span className="text-slate-200 font-semibold">
-                          قیمت، شماره کشو و موجودی کالاهای تکراری با فایل گوگل شیت به‌روز شود
+                          قیمت، شماره کشو و موجودی کالاهای تغییریافته با فایل گوگل شیت به‌روز شود
                         </span>
                       </label>
                     </div>
                   )}
 
                   {/* Preview breakdown list */}
-                  {preview.duplicateMatches.length > 0 && updateDuplicates && (
+                  {modifiedDuplicates.length > 0 && updateDuplicates && (
                     <div className="border border-slate-800 rounded-xl p-3 bg-slate-900/60 max-h-36 overflow-y-auto space-y-2">
                       <div className="text-[11px] font-bold text-amber-400 flex items-center gap-1">
                         <AlertTriangle className="w-3.5 h-3.5" />
-                        <span>لیست نمونه کالاهای دارای به‌روزرسانی قیمت:</span>
+                        <span>نمونه کالاهای دارای تغییر قیمت/اطلاعات ({formatPersianNumber(modifiedDuplicates.length)} مورد):</span>
                       </div>
-                      {preview.duplicateMatches.slice(0, 10).map((match, idx) => (
+                      {modifiedDuplicates.slice(0, 10).map((match, idx) => (
                         <div key={idx} className="text-[11px] p-2 rounded-lg bg-slate-950 border border-slate-800 flex items-center justify-between">
                           <span className="font-medium text-slate-200">{match.name} ({match.brand})</span>
                           <div className="flex items-center gap-2 font-mono">
@@ -454,7 +612,7 @@ export const GoogleSheetsModal: React.FC<GoogleSheetsModalProps> = ({
                   {/* Confirmation Button inside prompt box */}
                   <div className="pt-2 flex items-center justify-between border-t border-emerald-900/40">
                     <span className="text-[11px] text-emerald-400 font-bold">
-                      آماده به‌روزرسانی انبار
+                      آماده به‌روزرسانی هوشمند انبار ({formatPersianNumber(preview.newProducts.length + (updateDuplicates ? modifiedDuplicates.length : 0))} تغییر)
                     </span>
                     <button
                       onClick={handleConfirmSync}
@@ -466,9 +624,14 @@ export const GoogleSheetsModal: React.FC<GoogleSheetsModalProps> = ({
                   </div>
                 </div>
               ) : (
-                <div className="p-4 bg-emerald-950/40 border border-emerald-800/60 rounded-2xl text-emerald-200 text-xs font-bold flex items-center gap-2.5">
-                  <CheckCircle2 className="w-5 h-5 text-emerald-400 shrink-0" />
-                  <span>انبار شما کاملاً به‌روز است و هیچ تغییر یا کالای جدیدی در فایل گوگل شیت یافت نشد.</span>
+                <div className="p-4 bg-emerald-950/40 border border-emerald-800/60 rounded-2xl text-emerald-200 text-xs font-bold space-y-1">
+                  <div className="flex items-center gap-2 text-emerald-300 font-bold text-sm">
+                    <CheckCircle2 className="w-5 h-5 text-emerald-400 shrink-0" />
+                    <span>انبار شما کاملاً به‌روز است!</span>
+                  </div>
+                  <p className="text-[11px] text-slate-300 leading-relaxed font-normal pt-1">
+                    تعداد {formatPersianNumber(preview.duplicateMatches.length)} کالا در شیت با انبار سنجیده شد و هیچ تغییر قیمت، موجودی یا موقعیتی یافت نشد.
+                  </p>
                 </div>
               )}
             </div>

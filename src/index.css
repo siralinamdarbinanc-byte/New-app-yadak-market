@@ -45,3 +45,16 @@
   background: rgba(147, 51, 234, 0.7);
 }
 
+/* RTL and Bidirectional text support for Persian/English product titles */
+.rtl-text, [dir="rtl"] {
+  direction: rtl;
+  text-align: right;
+}
+
+/* Forces right-to-left isolation on product titles with mixed Persian/English/Digits/Parentheses */
+.bidi-plaintext {
+  direction: rtl !important;
+  text-align: right !important;
+  unicode-bidi: plaintext !important;
+}
+

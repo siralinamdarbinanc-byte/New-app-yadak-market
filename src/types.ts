@@ -13,6 +13,7 @@ export interface Product {
   minStock?: number;
   location?: string; // Shelf/Aisle in warehouse e.g. "قفسه B-04"
   lastUpdate?: string; // e.g. "۱۴۰۳/۰۵/۰۲"
+  updatedAt?: number; // Millisecond timestamp e.g. 1721890000000
   description?: string;
   csvId?: number;
 }
@@ -44,6 +45,10 @@ export interface DuplicateMatch {
   newPrice: string;
   oldPriceNumeric: number;
   newPriceNumeric: number;
+  hasChanges?: boolean;
+  isStale?: boolean;
+  existingProduct?: Product;
+  newProduct?: Product;
 }
 
 export interface CsvPreview {

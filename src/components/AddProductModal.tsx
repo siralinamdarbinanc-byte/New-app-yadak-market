@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { X, Plus, Tag, DollarSign, Barcode, MapPin, Package, Layers, Camera } from 'lucide-react';
 import { Product } from '../types';
-import { inferCategoryFromName, inferVehiclesFromName, normalizeDigits } from '../utils/pricing';
+import { inferCategoryFromName, inferVehiclesFromName, normalizeDigits, cleanProductName } from '../utils/pricing';
 import { BarcodeScannerModal } from './BarcodeScannerModal';
 
 interface AddProductModalProps {
@@ -47,10 +47,13 @@ export const AddProductModal: React.FC<AddProductModalProps> = ({
       .map((v) => v.trim())
       .filter((v) => v.length > 0);
 
+    const cleanedName = cleanProductName(name);
+    const cleanedBrand = cleanProductName(brand) || 'شرکتی';
+
     const newProduct: Product = {
       id: Date.now(),
-      name: name.trim(),
-      brand: brand.trim() || 'شرکتی',
+      name: cleanedName,
+      brand: cleanedBrand,
       price: cleanPrice,
       numericPrice: numeric,
       oemCode: oemCode.trim() || undefined,

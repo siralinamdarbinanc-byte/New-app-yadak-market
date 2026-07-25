@@ -1,5 +1,5 @@
 import { Product, DuplicateMatch, CsvPreview } from '../types';
-import { normalizePersianText, normalizeDigits } from './pricing';
+import { normalizePersianText, normalizeDigits, cleanProductName } from './pricing';
 
 /**
  * Detects the best delimiter (comma, semicolon, tab, pipe) used in the CSV string
@@ -129,21 +129,21 @@ export function processCsvUpload(
 
     // Use detected column indices if headers were found
     if (nameColIdx !== -1 && nameColIdx < tokens.length) {
-      name = normalizePersianText(tokens[nameColIdx]);
+      name = cleanProductName(tokens[nameColIdx]);
       if (brandColIdx !== -1 && brandColIdx < tokens.length) {
-        brand = normalizePersianText(tokens[brandColIdx]);
+        brand = cleanProductName(tokens[brandColIdx]);
       }
       if (priceColIdx !== -1 && priceColIdx < tokens.length) {
         priceRaw = tokens[priceColIdx];
       }
       if (oemColIdx !== -1 && oemColIdx < tokens.length) {
-        oemCode = tokens[oemColIdx];
+        oemCode = cleanProductName(tokens[oemColIdx]);
       }
       if (locationColIdx !== -1 && locationColIdx < tokens.length) {
-        location = tokens[locationColIdx];
+        location = cleanProductName(tokens[locationColIdx]);
       }
       if (categoryColIdx !== -1 && categoryColIdx < tokens.length) {
-        category = tokens[categoryColIdx];
+        category = cleanProductName(tokens[categoryColIdx]);
       }
       if (stockColIdx !== -1 && stockColIdx < tokens.length) {
         const sStr = normalizeDigits(tokens[stockColIdx]).replace(/[^\d]/g, '');
@@ -153,17 +153,17 @@ export function processCsvUpload(
       // Fallback positional indexing
       if (tokens.length >= 4) {
         // [row/id, name, brand, price]
-        name = normalizePersianText(tokens[1]);
-        brand = normalizePersianText(tokens[2]);
+        name = cleanProductName(tokens[1]);
+        brand = cleanProductName(tokens[2]);
         priceRaw = tokens[3];
       } else if (tokens.length === 3) {
         // [name, brand, price]
-        name = normalizePersianText(tokens[0]);
-        brand = normalizePersianText(tokens[1]);
+        name = cleanProductName(tokens[0]);
+        brand = cleanProductName(tokens[1]);
         priceRaw = tokens[2];
       } else if (tokens.length === 2) {
         // [name, price]
-        name = normalizePersianText(tokens[0]);
+        name = cleanProductName(tokens[0]);
         priceRaw = tokens[1];
       }
     }
@@ -177,13 +177,39 @@ export function processCsvUpload(
     const key = `${name}___${brand}`;
     if (existingMap.has(key)) {
       const oldProduct = existingMap.get(key)!;
+      const incomingProduct: Product = {
+        id: oldProduct.id,
+        name,
+        brand: brand || oldProduct.brand || 'اصلی',
+        price: priceDigitsOnly,
+        numericPrice,
+        oemCode: oemCode || oldProduct.oemCode,
+        location: location || oldProduct.location,
+        category: category || oldProduct.category,
+        stock: stockNum !== undefined ? stockNum : oldProduct.stock,
+        lastUpdate: new Date().toLocaleDateString('fa-IR'),
+        updatedAt: Date.now(),
+        csvId: Date.now()
+      };
+
+      const hasPriceChange = oldProduct.numericPrice !== numericPrice;
+      const hasStockChange = stockNum !== undefined && oldProduct.stock !== stockNum;
+      const hasLocationChange = Boolean(location && oldProduct.location !== location);
+      const hasOemChange = Boolean(oemCode && oldProduct.oemCode !== oemCode);
+
+      const hasFieldChanges = hasPriceChange || hasStockChange || hasLocationChange || hasOemChange;
+      const hasChanges = hasFieldChanges;
+
       duplicateMatches.push({
         name,
         brand,
         oldPrice: oldProduct.price,
         newPrice: priceDigitsOnly,
         oldPriceNumeric: oldProduct.numericPrice,
-        newPriceNumeric: numericPrice
+        newPriceNumeric: numericPrice,
+        hasChanges,
+        existingProduct: oldProduct,
+        newProduct: incomingProduct
       });
     } else {
       newProducts.push({
@@ -197,6 +223,7 @@ export function processCsvUpload(
         category: category || undefined,
         stock: stockNum !== undefined ? stockNum : 0,
         lastUpdate: new Date().toLocaleDateString('fa-IR'),
+        updatedAt: Date.now(),
         csvId: Date.now()
       });
     }

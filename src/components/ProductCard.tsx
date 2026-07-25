@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { Product, BrandMarkupMap, CategoryMarkupMap, CurrencyMode, FontSizeSettings } from '../types';
-import { calculatePriceResult, formatCurrency, inferCategoryFromName, inferVehiclesFromName } from '../utils/pricing';
+import { calculatePriceResult, formatCurrency, inferCategoryFromName, inferVehiclesFromName, cleanProductName } from '../utils/pricing';
 import { getBrandColorStyle } from '../utils/brandColors';
 import { Tag, DollarSign, TrendingUp, Copy, Check, Edit2, Trash2, MapPin, Package, AlertTriangle, Plus, Minus, Barcode, Inbox } from 'lucide-react';
 
@@ -150,8 +150,12 @@ export const ProductCard: React.FC<ProductCardProps> = ({
         </div>
 
         {/* Product Title - Dynamically Sized */}
-        <h3 className={`${titleSizeClass} text-slate-100 line-clamp-2 mb-3 group-hover:text-purple-200 transition-colors leading-relaxed`}>
-          {product.name}
+        <h3
+          dir="rtl"
+          style={{ direction: 'rtl', unicodeBidi: 'plaintext', textAlign: 'right' }}
+          className={`${titleSizeClass} text-slate-100 line-clamp-2 mb-3 group-hover:text-purple-200 transition-colors leading-relaxed text-right`}
+        >
+          {cleanProductName(product.name)}
         </h3>
       </div>
 

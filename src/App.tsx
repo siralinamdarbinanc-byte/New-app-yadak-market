@@ -1,7 +1,8 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import initialProductsData from './data/products.json';
 import { Product, FilterState, BrandMarkupMap, CategoryMarkupMap, GoogleSheetsConfig, CurrencyMode, FontSizeSettings } from './types';
-import { normalizePersianText, inferCategoryFromName, inferVehiclesFromName, calculateStoreAnalytics } from './utils/pricing';
+import { normalizePersianText, inferCategoryFromName, inferVehiclesFromName, calculateStoreAnalytics, formatPersianNumber } from './utils/pricing';
+import { pushProductsToGoogleSheet, fetchAndProcessGoogleSheet } from './utils/googleSheets';
 import { cleanSearchText, evaluateProductSearch } from './utils/search';
 import { Header } from './components/Header';
 import { SearchBar } from './components/SearchBar';
@@ -178,6 +179,112 @@ export default function App() {
     localStorage.setItem('yadak_sheets_config', JSON.stringify(sheetsConfig));
   }, [sheetsConfig]);
 
+  // Pending changes queue for Google Sheets sync
+  const [pendingChanges, setPendingChanges] = useState<Product[]>(() => {
+    const saved = localStorage.getItem('yadak_pending_sheet_changes');
+    if (saved) {
+      try {
+        return JSON.parse(saved);
+      } catch (e) {}
+    }
+    return [];
+  });
+
+  useEffect(() => {
+    try {
+      localStorage.setItem('yadak_pending_sheet_changes', JSON.stringify(pendingChanges));
+    } catch (e) {
+      console.warn('localStorage storage limit reached for pending changes', e);
+    }
+  }, [pendingChanges]);
+
+  const trackPendingChanges = (modifiedItems: Product[]) => {
+    if (!modifiedItems || modifiedItems.length === 0) return;
+    setPendingChanges((prev) => {
+      const map = new Map<string | number, Product>();
+      // Preserve existing pending items
+      prev.forEach((p) => map.set(p.id, p));
+      // Overwrite/add newly updated items
+      modifiedItems.forEach((p) => map.set(p.id, p));
+      return Array.from(map.values());
+    });
+  };
+
+  const handleClearPendingChanges = () => {
+    setPendingChanges([]);
+    localStorage.removeItem('yadak_pending_sheet_changes');
+  };
+
+  // Toast message for background auto sync actions
+  const [autoSyncToast, setAutoSyncToast] = useState<string | null>(null);
+
+  // Auto-Push pending changes to Google Sheets when autoSync is enabled
+  useEffect(() => {
+    if (!sheetsConfig.autoSync || !sheetsConfig.sheetUrl || pendingChanges.length === 0) {
+      return;
+    }
+
+    const timer = setTimeout(async () => {
+      try {
+        const res = await pushProductsToGoogleSheet(sheetsConfig.sheetUrl, pendingChanges);
+        if (res) {
+          handleClearPendingChanges();
+          const syncTime = new Date().toLocaleTimeString('fa-IR') + ' - ' + new Date().toLocaleDateString('fa-IR');
+          setSheetsConfig((prev) => ({
+            ...prev,
+            lastSync: syncTime,
+          }));
+          setAutoSyncToast(`ارسال خودکار: ${formatPersianNumber(pendingChanges.length)} تغییر جدید به گوگل شیت منتقل شد.`);
+          setTimeout(() => setAutoSyncToast(null), 4000);
+        }
+      } catch (err) {
+        console.warn('ارسال خودکار به گوگل شیت با خطا مواجه شد:', err);
+      }
+    }, 3000);
+
+    return () => clearTimeout(timer);
+  }, [pendingChanges, sheetsConfig.autoSync, sheetsConfig.sheetUrl]);
+
+  // Auto-Pull changes from Google Sheets every 60 seconds (1 minute)
+  useEffect(() => {
+    if (!sheetsConfig.autoSync || !sheetsConfig.sheetUrl) {
+      return;
+    }
+
+    const performAutoPull = async () => {
+      try {
+        const preview = await fetchAndProcessGoogleSheet(sheetsConfig.sheetUrl, products);
+        const modifiedDuplicates = preview.duplicateMatches.filter((m) => m.hasChanges && !m.isStale);
+
+        if (preview.newProducts.length > 0 || modifiedDuplicates.length > 0) {
+          handleImportCsv(preview.newProducts, modifiedDuplicates, true);
+          const syncTime = new Date().toLocaleTimeString('fa-IR') + ' - ' + new Date().toLocaleDateString('fa-IR');
+          setSheetsConfig((prev) => ({
+            ...prev,
+            lastSync: syncTime,
+          }));
+
+          const count = preview.newProducts.length + modifiedDuplicates.length;
+          setAutoSyncToast(`دریافت خودکار: ${formatPersianNumber(count)} به‌روزرسانی جدید از گوگل شیت اعمال شد.`);
+          setTimeout(() => setAutoSyncToast(null), 4000);
+        } else {
+          const syncTime = new Date().toLocaleTimeString('fa-IR') + ' - ' + new Date().toLocaleDateString('fa-IR');
+          setSheetsConfig((prev) => ({
+            ...prev,
+            lastSync: syncTime,
+          }));
+        }
+      } catch (err) {
+        console.warn('دریافت خودکار از گوگل شیت با خطا مواجه شد:', err);
+      }
+    };
+
+    // Run interval every 60 seconds (60,000 ms)
+    const interval = setInterval(performAutoPull, 60000);
+
+    return () => clearInterval(interval);
+  }, [sheetsConfig.autoSync, sheetsConfig.sheetUrl, products]);
+
   // Extract unique categories list
   const uniqueCategories = useMemo(() => {
     const set = new Set<string>();
@@ -298,23 +405,35 @@ export default function App() {
 
   // Handlers for product edits/deletions/stock updates
   const handleSaveProduct = (updated: Product) => {
-    setProducts((prev) => prev.map((p) => (p.id === updated.id ? updated : p)));
-    setSelectedProduct(updated);
+    const withTimestamp = { ...updated, updatedAt: Date.now(), lastUpdate: new Date().toLocaleDateString('fa-IR') };
+    setProducts((prev) => prev.map((p) => (p.id === updated.id ? withTimestamp : p)));
+    setSelectedProduct(withTimestamp);
+    trackPendingChanges([withTimestamp]);
   };
 
   const handleUpdateStock = (id: number, newStock: number) => {
     setProducts((prev) =>
-      prev.map((p) =>
-        p.id === id ? { ...p, stock: newStock, lastUpdate: new Date().toLocaleDateString('fa-IR') } : p
-      )
+      prev.map((p) => {
+        if (p.id === id) {
+          const updated = { ...p, stock: newStock, updatedAt: Date.now(), lastUpdate: new Date().toLocaleDateString('fa-IR') };
+          trackPendingChanges([updated]);
+          return updated;
+        }
+        return p;
+      })
     );
   };
 
   const handleUpdateLocation = (id: number, newLocation: string) => {
     setProducts((prev) =>
-      prev.map((p) =>
-        p.id === id ? { ...p, location: newLocation, lastUpdate: new Date().toLocaleDateString('fa-IR') } : p
-      )
+      prev.map((p) => {
+        if (p.id === id) {
+          const updated = { ...p, location: newLocation, updatedAt: Date.now(), lastUpdate: new Date().toLocaleDateString('fa-IR') };
+          trackPendingChanges([updated]);
+          return updated;
+        }
+        return p;
+      })
     );
   };
 
@@ -328,11 +447,14 @@ export default function App() {
   };
 
   const handleAddProduct = (newProduct: Product) => {
-    setProducts((prev) => [newProduct, ...prev]);
+    const withTimestamp = { ...newProduct, updatedAt: Date.now(), lastUpdate: new Date().toLocaleDateString('fa-IR') };
+    setProducts((prev) => [withTimestamp, ...prev]);
+    trackPendingChanges([withTimestamp]);
   };
 
-  const handleImportCsv = (newProducts: Product[], duplicatesToUpdate: any[]) => {
+  const handleImportCsv = (newProducts: Product[], duplicatesToUpdate: any[], isFromAutoPull: boolean = false) => {
     let updatedList = [...products];
+    const modifiedForTracking: Product[] = [];
 
     // Update duplicates if requested
     if (duplicatesToUpdate && duplicatesToUpdate.length > 0) {
@@ -349,15 +471,19 @@ export default function App() {
           const newLoc = d.newProduct?.location || p.location;
           const newStock = d.newProduct?.stock !== undefined ? d.newProduct.stock : p.stock;
           const newOem = d.newProduct?.oemCode || p.oemCode;
-          return {
+          const incomingTs = d.newProduct?.updatedAt || Date.now();
+          const updatedProd = {
             ...p,
             numericPrice: newNumeric,
             price: String(newNumeric),
             location: newLoc,
             stock: newStock,
             oemCode: newOem,
-            lastUpdate: new Date().toLocaleDateString('fa-IR'),
+            updatedAt: incomingTs,
+            lastUpdate: d.newProduct?.lastUpdate || new Date().toLocaleDateString('fa-IR'),
           };
+          modifiedForTracking.push(updatedProd);
+          return updatedProd;
         }
         return p;
       });
@@ -365,10 +491,19 @@ export default function App() {
 
     // Append new products
     if (newProducts && newProducts.length > 0) {
-      updatedList = [...newProducts, ...updatedList];
+      const newProductsWithTs = newProducts.map((np) => ({
+        ...np,
+        updatedAt: np.updatedAt || Date.now(),
+        lastUpdate: np.lastUpdate || new Date().toLocaleDateString('fa-IR'),
+      }));
+      updatedList = [...newProductsWithTs, ...updatedList];
+      modifiedForTracking.push(...newProductsWithTs);
     }
 
     setProducts(updatedList);
+    if (!isFromAutoPull) {
+      trackPendingChanges(modifiedForTracking);
+    }
   };
 
   const handleBarcodeDetected = (code: string) => {
@@ -528,6 +663,8 @@ export default function App() {
         config={sheetsConfig}
         onSaveConfig={(cfg) => setSheetsConfig(cfg)}
         existingProducts={products}
+        pendingChanges={pendingChanges}
+        onClearPendingChanges={handleClearPendingChanges}
         onApplySync={handleImportCsv}
       />
 
@@ -590,6 +727,15 @@ export default function App() {
         onSaveLocation={handleUpdateLocation}
       />
 
+      {/* Floating Auto-Sync Toast Notification */}
+      {autoSyncToast && (
+        <div className="fixed bottom-6 right-6 z-50 bg-slate-900 border border-emerald-500/50 text-emerald-200 px-4 py-3 rounded-2xl shadow-2xl shadow-emerald-950/60 flex items-center gap-3 text-xs animate-fade-in">
+          <div className="w-2.5 h-2.5 rounded-full bg-emerald-400 animate-pulse shrink-0" />
+          <span className="font-bold">{autoSyncToast}</span>
+        </div>
+      )}
+
     </div>
   );
 }
+

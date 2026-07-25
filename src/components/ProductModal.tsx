@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Product, BrandMarkupMap, CategoryMarkupMap, CurrencyMode } from '../types';
-import { calculatePriceResult, formatCurrency, inferCategoryFromName, inferVehiclesFromName, normalizeDigits } from '../utils/pricing';
+import { calculatePriceResult, formatCurrency, inferCategoryFromName, inferVehiclesFromName, normalizeDigits, cleanProductName } from '../utils/pricing';
 import { X, Tag, DollarSign, TrendingUp, Printer, Copy, Check, Barcode, Save, MapPin, Package, AlertTriangle, Layers, Car, Calendar, Plus, Minus, Camera } from 'lucide-react';
 import { BarcodeScannerModal } from './BarcodeScannerModal';
 
@@ -120,8 +120,8 @@ export const ProductModal: React.FC<ProductModalProps> = ({
 
     onSave({
       ...product,
-      name: editName.trim() || product.name,
-      brand: editBrand.trim() || product.brand,
+      name: cleanProductName(editName) || product.name,
+      brand: cleanProductName(editBrand) || product.brand,
       price: cleanPriceStr,
       numericPrice: numeric,
       oemCode: editOemCode.trim() || undefined,
@@ -175,8 +175,12 @@ export const ProductModal: React.FC<ProductModalProps> = ({
               </span>
             </div>
 
-            <h2 className="text-lg font-black text-slate-100 print:text-black leading-snug">
-              {product.name}
+            <h2
+              dir="rtl"
+              style={{ direction: 'rtl', unicodeBidi: 'plaintext', textAlign: 'right' }}
+              className="text-lg font-black text-slate-100 print:text-black leading-snug text-right"
+            >
+              {cleanProductName(product.name)}
             </h2>
           </div>
 

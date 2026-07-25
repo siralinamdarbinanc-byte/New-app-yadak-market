@@ -91,12 +91,31 @@ export function normalizePersianText(s: string): string {
   if (!s) return '';
   let str = normalizeDigits(s);
   return str
+    .replace(/[\u200B-\u200D\u200E\u200F\u202A-\u202E\uFEFF\u00A0]/g, ' ')
     .replace(/ي/g, 'ی')
     .replace(/ك/g, 'ک')
     .replace(/ة/g, 'ه')
     .replace(/أ/g, 'ا')
     .replace(/إ/g, 'ا')
     .replace(/ؤ/g, 'و')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+/**
+ * Cleans product names from Google Sheets, CSV or user input:
+ * - Strips invisible Unicode directional control characters (LRM, RLM, BOM, ZERO-WIDTH space, NBSP)
+ * - Normalizes Arabic letters (ك -> ک, ي -> ی, ة -> ه)
+ * - Cleans up multiple spaces and trims
+ */
+export function cleanProductName(str: string | undefined | null): string {
+  if (!str) return '';
+  return String(str)
+    .replace(/[\u200B-\u200D\u200E\u200F\u202A-\u202E\uFEFF\u00A0]/g, ' ')
+    .replace(/ك/g, 'ک')
+    .replace(/[يى]/g, 'ی')
+    .replace(/ة/g, 'ه')
+    .replace(/\s+/g, ' ')
     .trim();
 }
 
@@ -191,3 +210,4 @@ export function calculateStoreAnalytics(
     brandsCount: brandsSet.size || 15,
   };
 }
+
