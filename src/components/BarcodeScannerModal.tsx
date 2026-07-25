@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { X, ScanBarcode, Camera, AlertCircle, CheckCircle2, RefreshCw, Check, Upload, Flashlight, SwitchCamera } from 'lucide-react';
-import { BrowserMultiFormatReader, NotFoundException, BarcodeFormat, DecodeHintType } from '@zxing/library';
+import { X, ScanBarcode, Camera, AlertCircle, CheckCircle2, RefreshCw, Check, Upload, Flashlight, SwitchCamera, ZoomIn, ZoomOut } from 'lucide-react';
+import { BrowserMultiFormatReader, BarcodeFormat, DecodeHintType } from '@zxing/library';
 import { Product } from '../types';
 
 interface BarcodeScannerModalProps {
@@ -36,14 +36,18 @@ export const BarcodeScannerModal: React.FC<BarcodeScannerModalProps> = ({
   const [scannedResult, setScannedResult] = useState<string | null>(null);
   const [foundProduct, setFoundProduct] = useState<Product | null>(null);
   const [torchOn, setTorchOn] = useState(false);
+  const [zoomLevel, setZoomLevel] = useState<number>(1);
+  const [maxZoom, setMaxZoom] = useState<number>(1);
+  const [isZoomSupported, setIsZoomSupported] = useState(false);
 
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const codeReaderRef = useRef<BrowserMultiFormatReader | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const captureInputRef = useRef<HTMLInputElement | null>(null);
   const activeStreamRef = useRef<MediaStream | null>(null);
-  const scanTimerRef = useRef<any>(null);
+  const scanIntervalRef = useRef<any>(null);
   const nativeDetectorRef = useRef<any>(null);
+  const offscreenCanvasRef = useRef<HTMLCanvasElement | null>(null);
 
   const playScanBeep = () => {
     try {
@@ -99,9 +103,9 @@ export const BarcodeScannerModal: React.FC<BarcodeScannerModalProps> = ({
   };
 
   const stopCamera = () => {
-    if (scanTimerRef.current) {
-      clearInterval(scanTimerRef.current);
-      scanTimerRef.current = null;
+    if (scanIntervalRef.current) {
+      clearInterval(scanIntervalRef.current);
+      scanIntervalRef.current = null;
     }
 
     if (codeReaderRef.current) {
@@ -157,7 +161,7 @@ export const BarcodeScannerModal: React.FC<BarcodeScannerModalProps> = ({
 
     const currentFacing = overrideFacing || facingMode;
 
-    // Check if native BarcodeDetector is available
+    // Check native BarcodeDetector support
     if ('BarcodeDetector' in window) {
       try {
         const supportedFormats = await (window as any).BarcodeDetector.getSupportedFormats();
@@ -169,7 +173,7 @@ export const BarcodeScannerModal: React.FC<BarcodeScannerModalProps> = ({
 
     const reader = getCodeReaderInstance();
 
-    // Enumerate video devices for camera selector
+    // Enumerate video devices
     try {
       const devList = await reader.listVideoInputDevices();
       setDevices(devList);
@@ -177,16 +181,15 @@ export const BarcodeScannerModal: React.FC<BarcodeScannerModalProps> = ({
       console.debug('Error listing video devices:', e);
     }
 
-    // Try multiple camera constraints from ideal to simplest fallback
     const constraintAttempts: MediaStreamConstraints[] = [];
 
     if (targetDeviceId) {
-      constraintAttempts.push({ video: { deviceId: { exact: targetDeviceId } } });
+      constraintAttempts.push({ video: { deviceId: { exact: targetDeviceId }, width: { ideal: 1920, min: 640 }, height: { ideal: 1080, min: 480 } } });
     }
 
     constraintAttempts.push(
+      { video: { facingMode: { ideal: currentFacing }, width: { ideal: 1920, min: 1280 }, height: { ideal: 1080, min: 720 }, frameRate: { ideal: 30, min: 15 } } },
       { video: { facingMode: { ideal: currentFacing }, width: { ideal: 1280 }, height: { ideal: 720 } } },
-      { video: { facingMode: { ideal: currentFacing } } },
       { video: { facingMode: currentFacing } },
       { video: true }
     );
@@ -231,52 +234,139 @@ export const BarcodeScannerModal: React.FC<BarcodeScannerModalProps> = ({
         setCameraActive(true);
         setIsLoading(false);
 
-        // Try applying continuous focus mode if supported natively on active track
+        // Apply Focus & Zoom settings if track supports them
         const track = stream.getVideoTracks()[0];
-        if (track && 'applyConstraints' in track) {
+        if (track && 'getCapabilities' in track) {
           try {
-            await (track as any).applyConstraints({
-              advanced: [{ focusMode: 'continuous' }]
-            });
+            const caps = (track as any).getCapabilities?.() || {};
+            if (caps.zoom) {
+              setIsZoomSupported(true);
+              setMaxZoom(caps.zoom.max || 4);
+              const initialZoom = Math.min(1.5, caps.zoom.max || 1);
+              setZoomLevel(initialZoom);
+              await (track as any).applyConstraints({
+                advanced: [{ zoom: initialZoom, focusMode: 'continuous' }]
+              });
+            } else {
+              await (track as any).applyConstraints({
+                advanced: [{ focusMode: 'continuous' }]
+              });
+            }
           } catch (e) {
-            // Ignore if focusMode not supported
+            // Ignore constraint errors
           }
         }
 
-        // Continuous decoding with ZXing from the live video element
-        reader.decodeFromVideoElement(
-          videoRef.current,
-          (result, err) => {
+        // Initialize Canvas for frame extraction
+        if (!offscreenCanvasRef.current) {
+          offscreenCanvasRef.current = document.createElement('canvas');
+        }
+
+        // High frequency scanning loop with Multi-Pass Canvas extraction
+        let passCounter = 0;
+        scanIntervalRef.current = setInterval(async () => {
+          const video = videoRef.current;
+          if (!video || video.readyState < 2 || video.videoWidth < 10) return;
+
+          const canvas = offscreenCanvasRef.current;
+          if (!canvas) return;
+
+          const vWidth = video.videoWidth;
+          const vHeight = video.videoHeight;
+
+          // 1. Native detector pass on live video if supported
+          if (nativeDetectorRef.current) {
+            try {
+              const detected = await nativeDetectorRef.current.detect(video);
+              if (detected && detected.length > 0 && detected[0].rawValue) {
+                const code = detected[0].rawValue;
+                stopCamera();
+                handleApplyCode(code);
+                return;
+              }
+            } catch (e) {
+              // ignore frame error
+            }
+          }
+
+          // 2. Multi-Pass Canvas extraction for ZXing
+          passCounter++;
+          const ctx = canvas.getContext('2d', { willReadFrequently: true });
+          if (!ctx) return;
+
+          // Target processing width (scale high-res video down to ~900px for fast & sharp decoding)
+          const targetW = Math.min(vWidth, 900);
+          const targetH = Math.round((vHeight / vWidth) * targetW);
+
+          canvas.width = targetW;
+          canvas.height = targetH;
+
+          if (passCounter % 2 === 1) {
+            // Pass A: Center crop (70% of frame where scan box is located)
+            const cropX = vWidth * 0.15;
+            const cropY = vHeight * 0.15;
+            const cropW = vWidth * 0.7;
+            const cropH = vHeight * 0.7;
+            ctx.drawImage(video, cropX, cropY, cropW, cropH, 0, 0, targetW, targetH);
+          } else {
+            // Pass B: Full frame
+            ctx.drawImage(video, 0, 0, targetW, targetH);
+          }
+
+          // Apply contrast enhancement on every 4th pass for low-light / glossy barcodes
+          if (passCounter % 4 === 0) {
+            try {
+              const imgData = ctx.getImageData(0, 0, targetW, targetH);
+              const data = imgData.data;
+              for (let i = 0; i < data.length; i += 4) {
+                // Greyscale + Contrast boost
+                const avg = (data[i] + data[i + 1] + data[i + 2]) / 3;
+                const v = avg < 110 ? 0 : 255;
+                data[i] = v;
+                data[i + 1] = v;
+                data[i + 2] = v;
+              }
+              ctx.putImageData(imgData, 0, 0);
+            } catch (e) {
+              // ignore canvas manipulation errors
+            }
+          }
+
+          // Decode frame with ZXing
+          try {
+            const result = await reader.decodeFromCanvas(canvas);
             if (result && result.getText()) {
               const text = result.getText();
               stopCamera();
               handleApplyCode(text);
             }
+          } catch (e) {
+            // NotFoundException expected when no barcode in frame
           }
-        );
+        }, 120);
 
-        // Secondary high-frequency check with native BarcodeDetector if available
-        scanTimerRef.current = setInterval(async () => {
-          if (!videoRef.current || videoRef.current.readyState < 2) return;
-          if (nativeDetectorRef.current) {
-            try {
-              const detected = await nativeDetectorRef.current.detect(videoRef.current);
-              if (detected && detected.length > 0 && detected[0].rawValue) {
-                const code = detected[0].rawValue;
-                stopCamera();
-                handleApplyCode(code);
-              }
-            } catch (e) {
-              // ignore frame decode errors
-            }
-          }
-        }, 150);
       }
     } catch (err: any) {
       console.error('Video decode binding error:', err);
       setIsLoading(false);
       setCameraActive(false);
       setErrorMsg('خطا در اتصال تصویر دوربین. می‌توانید از عکاسی مستقیم یا بارکدخوان دستی استفاده کنید.');
+    }
+  };
+
+  const setZoom = async (newLevel: number) => {
+    if (!activeStreamRef.current) return;
+    const track = activeStreamRef.current.getVideoTracks()[0];
+    if (track && 'applyConstraints' in track) {
+      try {
+        const clampedLevel = Math.max(1, Math.min(newLevel, maxZoom));
+        await (track as any).applyConstraints({
+          advanced: [{ zoom: clampedLevel }]
+        });
+        setZoomLevel(clampedLevel);
+      } catch (e) {
+        console.log('Zoom not supported');
+      }
     }
   };
 
@@ -409,7 +499,7 @@ export const BarcodeScannerModal: React.FC<BarcodeScannerModalProps> = ({
                 </span>
               </div>
 
-              {/* Controls Overlay */}
+              {/* Controls Overlay Top */}
               <div className="absolute top-3 inset-x-3 flex justify-between items-center pointer-events-auto">
                 <button
                   type="button"
@@ -425,9 +515,9 @@ export const BarcodeScannerModal: React.FC<BarcodeScannerModalProps> = ({
                   <select
                     value={selectedDeviceId}
                     onChange={handleDeviceChange}
-                    className="px-2 py-1 bg-slate-900/90 text-slate-200 text-[11px] rounded-xl border border-slate-700 focus:outline-none max-w-[140px] truncate"
+                    className="px-2 py-1 bg-slate-900/90 text-slate-200 text-[11px] rounded-xl border border-slate-700 focus:outline-none max-w-[130px] truncate"
                   >
-                    <option value="">دوربین پیش‌فرض</option>
+                    <option value="">دوربین اصلی</option>
                     {devices.map((d, i) => (
                       <option key={d.deviceId} value={d.deviceId}>
                         {d.label || `دوربین ${i + 1}`}
@@ -436,19 +526,43 @@ export const BarcodeScannerModal: React.FC<BarcodeScannerModalProps> = ({
                   </select>
                 )}
 
-                <button
-                  type="button"
-                  onClick={toggleTorch}
-                  className={`p-2 rounded-xl backdrop-blur-md border text-xs flex items-center gap-1.5 transition-colors ${
-                    torchOn
-                      ? 'bg-amber-500/30 border-amber-500/60 text-amber-300'
-                      : 'bg-slate-900/80 border-slate-700 text-slate-200 hover:bg-slate-900'
-                  }`}
-                  title="فلاش دوربین"
-                >
-                  <Flashlight className="w-3.5 h-3.5 text-amber-400" />
-                  <span className="text-[11px]">فلاش</span>
-                </button>
+                <div className="flex items-center gap-1">
+                  {/* Zoom Controls */}
+                  {isZoomSupported && (
+                    <div className="flex items-center bg-slate-900/80 rounded-xl border border-slate-700 p-0.5 backdrop-blur-md">
+                      <button
+                        type="button"
+                        onClick={() => setZoom(zoomLevel - 0.5)}
+                        className="p-1.5 hover:bg-slate-800 text-slate-300 rounded-lg text-[10px]"
+                        title="زوم کمتر"
+                      >
+                        <ZoomOut className="w-3 h-3 text-purple-300" />
+                      </button>
+                      <span className="text-[10px] font-mono px-1 text-purple-200">{zoomLevel.toFixed(1)}x</span>
+                      <button
+                        type="button"
+                        onClick={() => setZoom(zoomLevel + 0.5)}
+                        className="p-1.5 hover:bg-slate-800 text-slate-300 rounded-lg text-[10px]"
+                        title="زوم بیشتر"
+                      >
+                        <ZoomIn className="w-3 h-3 text-purple-300" />
+                      </button>
+                    </div>
+                  )}
+
+                  <button
+                    type="button"
+                    onClick={toggleTorch}
+                    className={`p-2 rounded-xl backdrop-blur-md border text-xs flex items-center gap-1.5 transition-colors ${
+                      torchOn
+                        ? 'bg-amber-500/30 border-amber-500/60 text-amber-300'
+                        : 'bg-slate-900/80 border-slate-700 text-slate-200 hover:bg-slate-900'
+                    }`}
+                    title="فلاش دوربین"
+                  >
+                    <Flashlight className="w-3.5 h-3.5 text-amber-400" />
+                  </button>
+                </div>
               </div>
 
               {/* Manual capture button & Native camera capture */}

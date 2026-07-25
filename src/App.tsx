@@ -454,7 +454,7 @@ export default function App() {
     trackPendingChanges([withTimestamp]);
   };
 
-  const handleImportCsv = (newProducts: Product[], duplicatesToUpdate: any[], isFromAutoPull: boolean = false) => {
+  const handleImportCsv = (newProducts: Product[], duplicatesToUpdate: any[], isFromSheetPull: boolean = false) => {
     let updatedList = [...products];
     const modifiedForTracking: Product[] = [];
 
@@ -505,7 +505,13 @@ export default function App() {
     }
 
     setProducts(updatedList);
-    if (!isFromAutoPull) {
+
+    if (isFromSheetPull) {
+      // Data came directly FROM Google Sheets: remove these items from pending queue since Google Sheets already has them!
+      const syncedIds = new Set(modifiedForTracking.map((p) => p.id));
+      setPendingChanges((prev) => prev.filter((p) => !syncedIds.has(p.id)));
+    } else {
+      // Local CSV import or manual edit: track as pending changes to send to Google Sheets
       trackPendingChanges(modifiedForTracking);
     }
   };
@@ -670,7 +676,7 @@ export default function App() {
           existingProducts={products}
           pendingChanges={pendingChanges}
           onClearPendingChanges={handleClearPendingChanges}
-          onApplySync={handleImportCsv}
+          onApplySync={(newProds, dupes) => handleImportCsv(newProds, dupes, true)}
         />
 
         <PricingSettingsModal
