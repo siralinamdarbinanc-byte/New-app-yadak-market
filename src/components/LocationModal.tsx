@@ -7,7 +7,7 @@ interface LocationModalProps {
   product: Product | null;
   isOpen: boolean;
   onClose: () => void;
-  onSaveLocation: (productId: number, newLocation: string) => void;
+  onSaveLocation: (productId: number | string, newLocation: string) => void;
 }
 
 const ROWS_A_Z = Array.from({ length: 26 }, (_, i) => String.fromCharCode(65 + i)); // A to Z
@@ -177,10 +177,10 @@ export const LocationModal: React.FC<LocationModalProps> = ({
               </span>
             )}
             
-            {product.code && (
+            {(product.oemCode || product.barcode) && (
               <span className="inline-flex items-center gap-1 font-mono text-slate-400 px-2 py-0.5 rounded bg-slate-900 border border-slate-800">
                 <Barcode className="w-3 h-3" />
-                کد: {product.code}
+                کد: {product.oemCode || product.barcode}
               </span>
             )}
 

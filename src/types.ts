@@ -1,5 +1,5 @@
 export interface Product {
-  id: number;
+  id: number | string;
   row?: number;
   name: string;
   brand: string;
@@ -56,6 +56,7 @@ export interface CsvPreview {
   csvId: number;
   newProducts: Product[];
   duplicateMatches: DuplicateMatch[];
+  totalParsed?: number;
 }
 
 export interface CsvFileRecord {

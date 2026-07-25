@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import initialProductsData from './data/products.json';
 import { Product, FilterState, BrandMarkupMap, CategoryMarkupMap, GoogleSheetsConfig, CurrencyMode, FontSizeSettings } from './types';
 import { normalizePersianText, inferCategoryFromName, inferVehiclesFromName, calculateStoreAnalytics, formatPersianNumber } from './utils/pricing';

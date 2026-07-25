@@ -232,6 +232,8 @@ export async function fetchAndProcessGoogleSheet(
         });
 
         return {
+          fileName: 'Google Sheets',
+          csvId: Date.now(),
           newProducts,
           duplicateMatches,
           totalParsed: formattedProducts.length,
@@ -256,10 +258,12 @@ export async function fetchAndProcessGoogleSheet(
 
     const parsed = processCsvUpload(trimmedText, 'Google Sheet Sync', existingProducts);
 
+    const totalCount = parsed.totalParsed || (parsed.newProducts.length + parsed.duplicateMatches.length);
+
     onProgress?.({
       percent: 100,
-      processed: parsed.totalParsed,
-      total: parsed.totalParsed,
+      processed: totalCount,
+      total: totalCount,
       remaining: 0,
       statusMessage: 'همگام‌سازی فایل کامل شد.'
     });

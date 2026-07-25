@@ -13,8 +13,8 @@ interface ProductCardProps {
   fontSizeSettings?: FontSizeSettings;
   onSelect: (product: Product) => void;
   onEdit?: (product: Product) => void;
-  onDelete?: (id: number) => void;
-  onUpdateStock?: (id: number, newStock: number) => void;
+  onDelete?: (id: number | string) => void;
+  onUpdateStock?: (id: number | string, newStock: number) => void;
   onOpenLocationModal?: (product: Product) => void;
 }
 

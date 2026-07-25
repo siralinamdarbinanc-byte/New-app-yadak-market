@@ -17,7 +17,7 @@ export default defineConfig(() => {
     build: {
       target: ['es2015', 'chrome60', 'safari11', 'edge18'],
       cssTarget: ['chrome60', 'safari11'],
-      minify: 'esbuild',
+      minify: true,
       chunkSizeWarningLimit: 2000,
       rollupOptions: {
         output: {
