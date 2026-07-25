@@ -73,6 +73,7 @@ export interface GoogleSheetsConfig {
   autoSync: boolean;
   lastSync: string | null;
   sheetName?: string;
+  scriptUrl?: string;
 }
 
 export interface StoreAnalytics {

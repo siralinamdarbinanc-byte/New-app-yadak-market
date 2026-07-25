@@ -59,3 +59,25 @@ export async function fetchAndProcessGoogleSheet(
     throw new Error(err.message || 'خطا در برقراری ارتباط با گوگل شیت');
   }
 }
+
+/**
+ * Uploads full product list to Google Sheet via Apps Script Web App
+ */
+export async function uploadProductsToSheet(
+  scriptUrl: string,
+  products: Product[]
+): Promise<number> {
+  if (!scriptUrl) throw new Error('لینک اسکریپت گوگل (Apps Script) تنظیم نشده است.');
+
+  const response = await fetch(scriptUrl, {
+    method: 'POST',
+    headers: { 'Content-Type': 'text/plain' },
+    body: JSON.stringify({ products }),
+  });
+
+  const result = await response.json();
+  if (!result.success) {
+    throw new Error('خطا در آپلود اطلاعات به گوگل شیت.');
+  }
+  return result.count;
+}
