@@ -473,6 +473,7 @@ export default function App() {
           const newLoc = d.newProduct?.location || p.location;
           const newStock = d.newProduct?.stock !== undefined ? d.newProduct.stock : p.stock;
           const newOem = d.newProduct?.oemCode || p.oemCode;
+          const newBarcode = d.newProduct?.barcode || d.newProduct?.oemCode || p.barcode;
           const incomingTs = d.newProduct?.updatedAt || Date.now();
           const updatedProd = {
             ...p,
@@ -481,6 +482,7 @@ export default function App() {
             location: newLoc,
             stock: newStock,
             oemCode: newOem,
+            barcode: newBarcode,
             updatedAt: incomingTs,
             lastUpdate: d.newProduct?.lastUpdate || new Date().toLocaleDateString('fa-IR'),
           };

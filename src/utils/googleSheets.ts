@@ -90,7 +90,10 @@ export async function fetchAndProcessGoogleSheet(
           const name = cleanProductName(rawName);
           const brand = cleanProductName(item.brand || item['برند'] || '');
           const numericPrice = Number(item.numericPrice || item.price || item['قیمت'] || 0) || 0;
-          const oemCode = cleanProductName(item.oemCode || item.code || item['کد فنی'] || item['کد'] || item['بارکد'] || '');
+          const rawOem = item.oemCode || item.code || item['کد فنی'] || item['کد'] || '';
+          const rawBarcode = item.barcode || item['بارکد'] || item['کد بارکد'] || item['بارکد کالا'] || rawOem || '';
+          const oemCode = cleanProductName(rawOem || rawBarcode);
+          const barcode = cleanProductName(rawBarcode || rawOem);
           const location = cleanProductName(item.location || item['موقعیت'] || item['کشو'] || 'عمومی');
           const stock = Number(item.stock || item['موجودی'] || 0) || 0;
           const updatedAt = Number(item.updatedAt || item['برچسب زمان'] || 0) || undefined;
@@ -103,6 +106,7 @@ export async function fetchAndProcessGoogleSheet(
             price: numericPrice.toLocaleString('fa-IR'),
             numericPrice,
             oemCode: oemCode ? String(oemCode) : undefined,
+            barcode: barcode ? String(barcode) : undefined,
             location,
             stock,
             lastUpdate,
@@ -134,8 +138,9 @@ export async function fetchAndProcessGoogleSheet(
             const hasStockChange = p.stock !== undefined && match.stock !== p.stock;
             const hasLocationChange = Boolean(p.location && match.location !== p.location);
             const hasOemChange = Boolean(p.oemCode && match.oemCode !== p.oemCode);
+            const hasBarcodeChange = Boolean(p.barcode && match.barcode !== p.barcode);
 
-            const hasFieldChanges = hasPriceChange || hasStockChange || hasLocationChange || hasOemChange;
+            const hasFieldChanges = hasPriceChange || hasStockChange || hasLocationChange || hasOemChange || hasBarcodeChange;
             const hasChanges = hasFieldChanges && !isStale;
 
             duplicateMatches.push({
@@ -203,7 +208,8 @@ export async function pushProductsToGoogleSheet(
       name: p.name,
       brand: p.brand || '',
       numericPrice: p.numericPrice || 0,
-      oemCode: p.oemCode || '',
+      oemCode: p.oemCode || p.barcode || '',
+      barcode: p.barcode || p.oemCode || '',
       location: p.location || '',
       stock: p.stock !== undefined ? p.stock : 0,
       category: p.category || 'عمومی',

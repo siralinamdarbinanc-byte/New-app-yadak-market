@@ -184,6 +184,7 @@ export function processCsvUpload(
         price: priceDigitsOnly,
         numericPrice,
         oemCode: oemCode || oldProduct.oemCode,
+        barcode: oemCode || oldProduct.barcode || oldProduct.oemCode,
         location: location || oldProduct.location,
         category: category || oldProduct.category,
         stock: stockNum !== undefined ? stockNum : oldProduct.stock,
@@ -196,8 +197,9 @@ export function processCsvUpload(
       const hasStockChange = stockNum !== undefined && oldProduct.stock !== stockNum;
       const hasLocationChange = Boolean(location && oldProduct.location !== location);
       const hasOemChange = Boolean(oemCode && oldProduct.oemCode !== oemCode);
+      const hasBarcodeChange = Boolean(oemCode && oldProduct.barcode !== oemCode);
 
-      const hasFieldChanges = hasPriceChange || hasStockChange || hasLocationChange || hasOemChange;
+      const hasFieldChanges = hasPriceChange || hasStockChange || hasLocationChange || hasOemChange || hasBarcodeChange;
       const hasChanges = hasFieldChanges;
 
       duplicateMatches.push({
@@ -219,6 +221,7 @@ export function processCsvUpload(
         price: priceDigitsOnly,
         numericPrice,
         oemCode: oemCode || undefined,
+        barcode: oemCode || undefined,
         location: location || undefined,
         category: category || undefined,
         stock: stockNum !== undefined ? stockNum : 0,
