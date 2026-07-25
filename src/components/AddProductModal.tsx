@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { X, Plus, Tag, DollarSign, Barcode, MapPin, Package, Layers, Camera } from 'lucide-react';
 import { Product } from '../types';
-import { inferCategoryFromName, inferVehiclesFromName } from '../utils/pricing';
+import { inferCategoryFromName, inferVehiclesFromName, normalizeDigits } from '../utils/pricing';
 import { BarcodeScannerModal } from './BarcodeScannerModal';
 
 interface AddProductModalProps {
@@ -37,8 +37,9 @@ export const AddProductModal: React.FC<AddProductModalProps> = ({
     e.preventDefault();
     if (!name.trim()) return;
 
-    const cleanPrice = price.replace(/,/g, '').trim();
-    const numeric = parseInt(cleanPrice, 10) || 0;
+    const rawDigits = normalizeDigits(price || '').replace(/[^0-9]/g, '');
+    const numeric = parseInt(rawDigits, 10) || 0;
+    const cleanPrice = numeric > 0 ? numeric.toLocaleString('en-US') : (price.trim() || '0');
 
     const inferredCat = category.trim() || inferCategoryFromName(name);
     const parsedVehicles = vehicles

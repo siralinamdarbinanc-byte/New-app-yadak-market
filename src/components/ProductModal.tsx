@@ -1,6 +1,6 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Product, BrandMarkupMap, CategoryMarkupMap, CurrencyMode } from '../types';
-import { calculatePriceResult, formatCurrency, inferCategoryFromName, inferVehiclesFromName } from '../utils/pricing';
+import { calculatePriceResult, formatCurrency, inferCategoryFromName, inferVehiclesFromName, normalizeDigits } from '../utils/pricing';
 import { X, Tag, DollarSign, TrendingUp, Printer, Copy, Check, Barcode, Save, MapPin, Package, AlertTriangle, Layers, Car, Calendar, Plus, Minus, Camera } from 'lucide-react';
 import { BarcodeScannerModal } from './BarcodeScannerModal';
 
@@ -32,7 +32,11 @@ export const ProductModal: React.FC<ProductModalProps> = ({
   // Form edit states
   const [editName, setEditName] = useState(product.name);
   const [editBrand, setEditBrand] = useState(product.brand);
-  const [editPrice, setEditPrice] = useState(product.price);
+  const [editPrice, setEditPrice] = useState(
+    product.numericPrice !== undefined && product.numericPrice !== null && product.numericPrice > 0
+      ? String(product.numericPrice)
+      : product.price || ''
+  );
   const [editOemCode, setEditOemCode] = useState(product.oemCode || '');
   const [editBarcode, setEditBarcode] = useState(product.barcode || '');
   const [editCategory, setEditCategory] = useState(product.category || inferCategoryFromName(product.name));
@@ -42,6 +46,31 @@ export const ProductModal: React.FC<ProductModalProps> = ({
   const [editVehicles, setEditVehicles] = useState(
     (product.vehicles && product.vehicles.length > 0 ? product.vehicles : inferVehiclesFromName(product.name)).join('، ')
   );
+
+  // Sync form edit state whenever product or edit mode changes
+  useEffect(() => {
+    if (product) {
+      setEditName(product.name);
+      setEditBrand(product.brand);
+      setEditPrice(
+        product.numericPrice !== undefined && product.numericPrice !== null && product.numericPrice > 0
+          ? String(product.numericPrice)
+          : product.price || ''
+      );
+      setEditOemCode(product.oemCode || '');
+      setEditBarcode(product.barcode || '');
+      setEditCategory(product.category || inferCategoryFromName(product.name));
+      setEditLocation(product.location || 'قفسه عمومی');
+      setEditStock(product.stock !== undefined ? product.stock : 0);
+      setEditMinStock(product.minStock !== undefined ? product.minStock : 3);
+      setEditVehicles(
+        (product.vehicles && product.vehicles.length > 0
+          ? product.vehicles
+          : inferVehiclesFromName(product.name)
+        ).join('، ')
+      );
+    }
+  }, [product, isEditing]);
 
   const category = product.category || inferCategoryFromName(product.name);
   const vehicles = product.vehicles && product.vehicles.length > 0
@@ -72,8 +101,17 @@ export const ProductModal: React.FC<ProductModalProps> = ({
 
   const handleSave = () => {
     if (!onSave) return;
-    const cleanPrice = editPrice.replace(/,/g, '').trim();
-    const numeric = parseInt(cleanPrice, 10) || 0;
+
+    // Fail-safe price extraction: convert Persian/Arabic numbers to English, strip commas & symbols
+    const rawDigits = normalizeDigits(editPrice || '').replace(/[^0-9]/g, '');
+    let numeric = parseInt(rawDigits, 10);
+
+    // If parsing fails or input was empty/invalid, keep the existing product.numericPrice!
+    if (isNaN(numeric) || (numeric === 0 && product.numericPrice > 0 && !rawDigits)) {
+      numeric = product.numericPrice || 0;
+    }
+
+    const cleanPriceStr = numeric > 0 ? numeric.toLocaleString('en-US') : (editPrice.trim() || '0');
 
     const parsedVehicles = editVehicles
       .split(/[,،]/)
@@ -82,16 +120,16 @@ export const ProductModal: React.FC<ProductModalProps> = ({
 
     onSave({
       ...product,
-      name: editName,
-      brand: editBrand,
-      price: cleanPrice,
+      name: editName.trim() || product.name,
+      brand: editBrand.trim() || product.brand,
+      price: cleanPriceStr,
       numericPrice: numeric,
       oemCode: editOemCode.trim() || undefined,
       barcode: editBarcode.trim() || null,
-      category: editCategory.trim(),
-      location: editLocation.trim(),
-      stock: Number(editStock),
-      minStock: Number(editMinStock),
+      category: editCategory.trim() || category,
+      location: editLocation.trim() || 'قفسه عمومی',
+      stock: isNaN(Number(editStock)) ? (product.stock ?? 0) : Number(editStock),
+      minStock: isNaN(Number(editMinStock)) ? (product.minStock ?? 3) : Number(editMinStock),
       vehicles: parsedVehicles.length > 0 ? parsedVehicles : vehicles,
       lastUpdate: new Date().toLocaleDateString('fa-IR'),
     });
