@@ -31,27 +31,56 @@ export function convertGoogleSheetLinkToCsvUrl(url: string): string {
 /**
  * Fetches Google Sheet CSV content from converted URL and processes items
  */
+function arrayToCsv(rows: any[][]): string {
+  return rows
+    .map((row) =>
+      row
+        .map((cell) => {
+          const str = String(cell ?? '');
+          if (str.includes(',') || str.includes('"') || str.includes('\n')) {
+            return '"' + str.replace(/"/g, '""') + '"';
+          }
+          return str;
+        })
+        .join(',')
+    )
+    .join('\n');
+}
+
 export async function fetchAndProcessGoogleSheet(
   sheetUrl: string,
   existingProducts: Product[]
 ): Promise<CsvPreview> {
-  const directUrl = convertGoogleSheetLinkToCsvUrl(sheetUrl);
+  const trimmed = sheetUrl.trim();
 
   try {
-    const response = await fetch(directUrl, {
-      method: 'GET',
-      headers: {
-        'Accept': 'text/csv, text/plain, */*'
+    let csvText: string;
+
+    if (trimmed.includes('script.google.com')) {
+      const response = await fetch(trimmed);
+      if (!response.ok) {
+        throw new Error(`خطا در دریافت اطلاعات (کد خطا: ${response.status}).`);
       }
-    });
+      const rows = await response.json();
+      if (!Array.isArray(rows) || rows.length === 0) {
+        throw new Error('محتوای گوگل شیت خالی است.');
+      }
+      csvText = arrayToCsv(rows);
+    } else {
+      const directUrl = convertGoogleSheetLinkToCsvUrl(trimmed);
+      const response = await fetch(directUrl, {
+        method: 'GET',
+        headers: { 'Accept': 'text/csv, text/plain, */*' }
+      });
 
-    if (!response.ok) {
-      throw new Error(`خطا در دریافت اطلاعات گوگل شیت (کد خطا: ${response.status}). از عمومی بودن لایسنس یا لینک اشتراک کپی شده مطمئن شوید.`);
-    }
+      if (!response.ok) {
+        throw new Error(`خطا در دریافت اطلاعات گوگل شیت (کد خطا: ${response.status}). از عمومی بودن لایسنس یا لینک اشتراک کپی شده مطمئن شوید.`);
+      }
 
-    const csvText = await response.text();
-    if (!csvText || csvText.trim().length === 0) {
-      throw new Error('محتوای گوگل شیت خالی است.');
+      csvText = await response.text();
+      if (!csvText || csvText.trim().length === 0) {
+        throw new Error('محتوای گوگل شیت خالی است.');
+      }
     }
 
     return processCsvUpload(csvText, 'Google Sheet Sync', existingProducts);

@@ -80,7 +80,7 @@ export default function App() {
         return JSON.parse(saved);
       } catch (e) {}
     }
-    return { sheetUrl: '', autoSync: false, lastSync: null };
+    return { sheetUrl: 'https://script.google.com/macros/s/AKfycbyVX6Ag_ed6kb0kyo5r9TJaSWKUTGXY4EExh0iNW85okhG_RMr2Xu7LYVXDIWyT8wKE/exec', autoSync: false, lastSync: null, scriptUrl: 'https://script.google.com/macros/s/AKfycbyVX6Ag_ed6kb0kyo5r9TJaSWKUTGXY4EExh0iNW85okhG_RMr2Xu7LYVXDIWyT8wKE/exec' };
   });
 
   // Font Size Customization State
