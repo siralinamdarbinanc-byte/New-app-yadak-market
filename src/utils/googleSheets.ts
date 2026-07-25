@@ -139,3 +139,6 @@ export async function checkSheetLastModified(scriptUrl: string): Promise<string 
     return null;
   }
 }
+
+// Alias kept for compatibility with code that imports this under a different name
+export const pushProductsToGoogleSheet = uploadProductsToSheet;
