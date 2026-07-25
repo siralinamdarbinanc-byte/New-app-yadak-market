@@ -2,6 +2,14 @@ import { Product, DuplicateMatch, CsvPreview } from '../types';
 import { processCsvUpload } from './csv';
 import { cleanProductName } from './pricing';
 
+export interface ProgressInfo {
+  percent: number;       // 0 to 100
+  processed: number;     // e.g. 50
+  total: number;         // e.g. 200
+  remaining: number;     // e.g. 150
+  statusMessage: string; // Current status string
+}
+
 /**
  * Converts standard Google Sheet share link into a direct CSV download export URL
  */
@@ -43,9 +51,18 @@ export function convertGoogleSheetLinkToCsvUrl(url: string): string {
  */
 export async function fetchAndProcessGoogleSheet(
   sheetUrl: string,
-  existingProducts: Product[]
+  existingProducts: Product[],
+  onProgress?: (info: ProgressInfo) => void
 ): Promise<CsvPreview> {
   const directUrl = convertGoogleSheetLinkToCsvUrl(sheetUrl);
+
+  onProgress?.({
+    percent: 10,
+    processed: 0,
+    total: 0,
+    remaining: 0,
+    statusMessage: 'در حال برقراری ارتباط با گوگل شیت...'
+  });
 
   try {
     const response = await fetch(directUrl, {
@@ -53,6 +70,14 @@ export async function fetchAndProcessGoogleSheet(
       headers: {
         'Accept': 'application/json, text/csv, text/plain, */*'
       }
+    });
+
+    onProgress?.({
+      percent: 30,
+      processed: 0,
+      total: 0,
+      remaining: 0,
+      statusMessage: 'در حال دریافت اطلاعات انبار آنلاین...'
     });
 
     if (!response.ok) {
@@ -84,8 +109,21 @@ export async function fetchAndProcessGoogleSheet(
           throw new Error('داده‌های JSON دریافت شده از اسکریپت گوگل حاوی آرایه کالاها نبود.');
         }
 
+        const total = rawItems.length;
+
+        onProgress?.({
+          percent: 40,
+          processed: 0,
+          total,
+          remaining: total,
+          statusMessage: `در حال پردازش و برچسب‌گذاری ${total} کالا...`
+        });
+
         // Convert JSON items to CSV-like format or process them directly
-        const formattedProducts: Product[] = rawItems.map((item: any, idx: number) => {
+        const formattedProducts: Product[] = [];
+        
+        for (let idx = 0; idx < total; idx++) {
+          const item = rawItems[idx];
           const rawName = item.name || item.title || item['نام کالا'] || item['نام'] || 'کالای بدون نام';
           const name = cleanProductName(rawName);
           const brand = cleanProductName(item.brand || item['برند'] || '');
@@ -99,7 +137,7 @@ export async function fetchAndProcessGoogleSheet(
           const updatedAt = Number(item.updatedAt || item['برچسب زمان'] || 0) || undefined;
           const lastUpdate = String(item.lastUpdate || item['آخرین تغییرات'] || new Date().toLocaleDateString('fa-IR'));
 
-          return {
+          formattedProducts.push({
             id: `gs_${Date.now()}_${idx}`,
             name,
             brand,
@@ -111,7 +149,26 @@ export async function fetchAndProcessGoogleSheet(
             stock,
             lastUpdate,
             updatedAt,
-          };
+          });
+
+          if ((idx + 1) % 50 === 0 || idx === total - 1) {
+            const currentPercent = Math.min(85, Math.round(40 + ((idx + 1) / total) * 45));
+            onProgress?.({
+              percent: currentPercent,
+              processed: idx + 1,
+              total,
+              remaining: total - (idx + 1),
+              statusMessage: `در حال استخراج کالا ${idx + 1} از ${total} (${total - (idx + 1)} باقی‌مانده)...`
+            });
+          }
+        }
+
+        onProgress?.({
+          percent: 90,
+          processed: total,
+          total,
+          remaining: 0,
+          statusMessage: 'در حال تطبیق با کالاهای موجود انبار...'
         });
 
         // Separate duplicate matches vs new products
@@ -131,9 +188,7 @@ export async function fetchAndProcessGoogleSheet(
               updatedAt: p.updatedAt || Date.now(),
             };
 
-            // Timestamp check: If local app product was modified after incoming sheet row, incoming is stale
             const isStale = Boolean(match.updatedAt && p.updatedAt && match.updatedAt > p.updatedAt);
-
             const hasPriceChange = match.numericPrice !== p.numericPrice;
             const hasStockChange = p.stock !== undefined && match.stock !== p.stock;
             const hasLocationChange = Boolean(p.location && match.location !== p.location);
@@ -163,6 +218,14 @@ export async function fetchAndProcessGoogleSheet(
           }
         });
 
+        onProgress?.({
+          percent: 100,
+          processed: total,
+          total,
+          remaining: 0,
+          statusMessage: 'دریافت و تحلیل گوگل شیت کامل شد!'
+        });
+
         return {
           newProducts,
           duplicateMatches,
@@ -178,33 +241,39 @@ export async function fetchAndProcessGoogleSheet(
     }
 
     // Standard CSV text parsing
-    return processCsvUpload(trimmedText, 'Google Sheet Sync', existingProducts);
+    onProgress?.({
+      percent: 80,
+      processed: 0,
+      total: 0,
+      remaining: 0,
+      statusMessage: 'در حال پردازش ساختار CSV گوگل شیت...'
+    });
+
+    const parsed = processCsvUpload(trimmedText, 'Google Sheet Sync', existingProducts);
+
+    onProgress?.({
+      percent: 100,
+      processed: parsed.totalParsed,
+      total: parsed.totalParsed,
+      remaining: 0,
+      statusMessage: 'همگام‌سازی فایل کامل شد.'
+    });
+
+    return parsed;
   } catch (err: any) {
     throw new Error(err.message || 'خطا در برقراری ارتباط با گوگل شیت');
   }
 }
 
 /**
- * Sends current inventory products to Google Apps Script Web App endpoint to sync/update Google Sheet
+ * Helper to post a single batch chunk of products to Google Apps Script
  */
-export async function pushProductsToGoogleSheet(
+async function sendSingleChunkToGoogleSheet(
   scriptUrl: string,
-  products: Product[]
+  chunkProducts: Product[]
 ): Promise<{ updated: number; added: number; message: string }> {
-  let trimmedUrl = scriptUrl.trim();
-  if (!trimmedUrl || (!trimmedUrl.includes('script.google.com') && !trimmedUrl.includes('google.com'))) {
-    throw new Error('برای ارسال اطلاعات به گوگل شیت، باید لینک Google Apps Script Web App (با پسوند /exec) را وارد کنید.');
-  }
-
-  // Auto-append sheetId if not already present
-  if (trimmedUrl.includes('script.google.com') && !trimmedUrl.includes('sheetId=')) {
-    const defaultSheetId = '1uMsiEKnjJ5Vgvc5iDbCgWiU4_6ZSabfzws83qL8bgac';
-    const separator = trimmedUrl.includes('?') ? '&' : '?';
-    trimmedUrl = `${trimmedUrl}${separator}sheetId=${defaultSheetId}`;
-  }
-
   const payload = {
-    products: products.map((p) => ({
+    products: chunkProducts.map((p) => ({
       name: p.name,
       brand: p.brand || '',
       numericPrice: p.numericPrice || 0,
@@ -220,9 +289,8 @@ export async function pushProductsToGoogleSheet(
 
   const jsonBody = JSON.stringify(payload);
 
-  // 1. Try standard CORS fetch first (in case proxy or headers permit full response reading)
   try {
-    const response = await fetch(trimmedUrl, {
+    const response = await fetch(scriptUrl, {
       method: 'POST',
       headers: {
         'Content-Type': 'text/plain;charset=utf-8',
@@ -232,54 +300,121 @@ export async function pushProductsToGoogleSheet(
 
     if (response.ok) {
       const resText = await response.text();
-      let resJson;
       try {
-        resJson = JSON.parse(resText);
+        const resJson = JSON.parse(resText);
+        if (resJson.status === 'error') {
+          throw new Error(resJson.message || 'خطا در ثبت اطلاعات در اسکریپت گوگل شیت');
+        }
+        return {
+          updated: resJson.updated || chunkProducts.length,
+          added: resJson.added || 0,
+          message: resJson.message || 'اطلاعات با موفقیت ثبت شد.'
+        };
       } catch {
         return {
-          updated: products.length,
+          updated: chunkProducts.length,
           added: 0,
-          message: 'اطلاعات با موفقیت به گوگل شیت ارسال گردید.'
+          message: 'اطلاعات با موفقیت ارسال شد.'
         };
       }
-
-      if (resJson.status === 'error') {
-        throw new Error(resJson.message || 'خطا در ثبت اطلاعات در اسکریپت گوگل شیت');
-      }
-
-      return {
-        updated: resJson.updated || products.length,
-        added: resJson.added || 0,
-        message: resJson.message || 'اطلاعات انبار با موفقیت در گوگل شیت آنلاین ثبت شد.'
-      };
     }
   } catch (corsErr: any) {
     if (corsErr.message && corsErr.message.includes('خطا در ثبت اطلاعات')) {
       throw corsErr;
     }
-    // Otherwise it was a browser CORS 302 redirect restriction on script.google.com POST
   }
 
-  // 2. Robust Fallback: Send POST with mode: 'no-cors'
-  // Browsers successfully deliver the payload to script.google.com without failing on 302 CORS redirects
-  try {
-    await fetch(trimmedUrl, {
-      method: 'POST',
-      mode: 'no-cors',
-      headers: {
-        'Content-Type': 'text/plain;charset=utf-8',
-      },
-      body: jsonBody,
+  // Fallback no-cors
+  await fetch(scriptUrl, {
+    method: 'POST',
+    mode: 'no-cors',
+    headers: {
+      'Content-Type': 'text/plain;charset=utf-8',
+    },
+    body: jsonBody,
+  });
+
+  return {
+    updated: chunkProducts.length,
+    added: 0,
+    message: 'اطلاعات با موفقیت ارسال شد.'
+  };
+}
+
+/**
+ * Sends current inventory products to Google Apps Script Web App endpoint to sync/update Google Sheet with progress updates
+ */
+export async function pushProductsToGoogleSheet(
+  scriptUrl: string,
+  products: Product[],
+  onProgress?: (info: ProgressInfo) => void
+): Promise<{ updated: number; added: number; message: string }> {
+  let trimmedUrl = scriptUrl.trim();
+  if (!trimmedUrl || (!trimmedUrl.includes('script.google.com') && !trimmedUrl.includes('google.com'))) {
+    throw new Error('برای ارسال اطلاعات به گوگل شیت، باید لینک Google Apps Script Web App (با پسوند /exec) را وارد کنید.');
+  }
+
+  // Auto-append sheetId if not already present
+  if (trimmedUrl.includes('script.google.com') && !trimmedUrl.includes('sheetId=')) {
+    const defaultSheetId = '1uMsiEKnjJ5Vgvc5iDbCgWiU4_6ZSabfzws83qL8bgac';
+    const separator = trimmedUrl.includes('?') ? '&' : '?';
+    trimmedUrl = `${trimmedUrl}${separator}sheetId=${defaultSheetId}`;
+  }
+
+  const total = products.length;
+  if (total === 0) {
+    return { updated: 0, added: 0, message: 'کالایی برای ارسال وجود ندارد.' };
+  }
+
+  // Chunk products into batches of 100 to prevent payload size or timeout errors
+  const chunkSize = 100;
+  let totalUpdated = 0;
+  let totalAdded = 0;
+
+  for (let i = 0; i < total; i += chunkSize) {
+    const chunk = products.slice(i, i + chunkSize);
+    const chunkNum = Math.floor(i / chunkSize) + 1;
+    const totalChunks = Math.ceil(total / chunkSize);
+    const startPercent = Math.round((i / total) * 100);
+
+    onProgress?.({
+      percent: startPercent,
+      processed: i,
+      total,
+      remaining: total - i,
+      statusMessage: `در حال ارسال بسته ${chunkNum} از ${totalChunks} (${chunk.length} کالا به گوگل شیت)...`
     });
 
-    return {
-      updated: products.length,
-      added: 0,
-      message: 'اطلاعات انبار با موفقیت به گوگل شیت آنلاین ارسال و بروزرسانی شد.'
-    };
-  } catch (err: any) {
-    throw new Error(err.message || 'خطا در ارسال داده به گوگل شیت. از تنظیم بودن دسترسی اسکریپت روی Anyone مطمئن شوید.');
+    const res = await sendSingleChunkToGoogleSheet(trimmedUrl, chunk);
+    totalUpdated += res.updated;
+    totalAdded += res.added;
+
+    const processed = Math.min(i + chunkSize, total);
+    const endPercent = Math.round((processed / total) * 100);
+
+    onProgress?.({
+      percent: endPercent,
+      processed,
+      total,
+      remaining: total - processed,
+      statusMessage: `بسته ${chunkNum} ارسال شد (${processed} از ${total} کالا تکمیل شد)`
+    });
   }
+
+  onProgress?.({
+    percent: 100,
+    processed: total,
+    total,
+    remaining: 0,
+    statusMessage: 'ارسال تمامی کالاها به گوگل شیت با موفقیت انجام شد.'
+  });
+
+  return {
+    updated: totalUpdated,
+    added: totalAdded,
+    message: 'اطلاعات انبار با موفقیت در گوگل شیت آنلاین ثبت و به‌روزرسانی شد.'
+  };
 }
+
 
 

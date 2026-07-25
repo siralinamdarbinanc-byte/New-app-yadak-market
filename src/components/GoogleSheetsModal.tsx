@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { X, Cloud, RefreshCw, CheckCircle2, AlertCircle, Link, ArrowLeft, ArrowRight, ShieldCheck, Code2, Copy, Check, AlertTriangle, Sparkles, Plus, Layers, FileText, Upload, Download } from 'lucide-react';
 import { Product, GoogleSheetsConfig, CsvPreview } from '../types';
-import { fetchAndProcessGoogleSheet, pushProductsToGoogleSheet } from '../utils/googleSheets';
+import { fetchAndProcessGoogleSheet, pushProductsToGoogleSheet, ProgressInfo } from '../utils/googleSheets';
 import { formatPersianNumber } from '../utils/pricing';
 
 const GOOGLE_APPS_SCRIPT_CODE = `/**
@@ -201,6 +201,7 @@ export const GoogleSheetsModal: React.FC<GoogleSheetsModalProps> = ({
   const [syncedSuccess, setSyncedSuccess] = useState(false);
   const [updateDuplicates, setUpdateDuplicates] = useState(true);
   const [pushScope, setPushScope] = useState<'PENDING' | 'ALL'>('PENDING');
+  const [progressInfo, setProgressInfo] = useState<ProgressInfo | null>(null);
 
   const handleCopyScript = () => {
     navigator.clipboard.writeText(GOOGLE_APPS_SCRIPT_CODE);
@@ -219,9 +220,20 @@ export const GoogleSheetsModal: React.FC<GoogleSheetsModalProps> = ({
     setPreview(null);
     setPushResult(null);
     setSyncedSuccess(false);
+    setProgressInfo({
+      percent: 5,
+      processed: 0,
+      total: 0,
+      remaining: 0,
+      statusMessage: 'شروع برقراری ارتباط با گوگل شیت...'
+    });
 
     try {
-      const result = await fetchAndProcessGoogleSheet(sheetUrlInput, existingProducts);
+      const result = await fetchAndProcessGoogleSheet(
+        sheetUrlInput,
+        existingProducts,
+        (info) => setProgressInfo(info)
+      );
       setPreview(result);
       
       // Save sheet url config
@@ -255,9 +267,20 @@ export const GoogleSheetsModal: React.FC<GoogleSheetsModalProps> = ({
     setErrorMsg('');
     setPreview(null);
     setPushResult(null);
+    setProgressInfo({
+      percent: 5,
+      processed: 0,
+      total: targetProducts.length,
+      remaining: targetProducts.length,
+      statusMessage: 'آماده‌سازی بسته‌های ارسال داده...'
+    });
 
     try {
-      const res = await pushProductsToGoogleSheet(sheetUrlInput, targetProducts);
+      const res = await pushProductsToGoogleSheet(
+        sheetUrlInput,
+        targetProducts,
+        (info) => setProgressInfo(info)
+      );
       
       if (isSendingPending) {
         onClearPendingChanges();
@@ -468,7 +491,50 @@ export const GoogleSheetsModal: React.FC<GoogleSheetsModalProps> = ({
               </button>
             </div>
 
-            {config.lastSync && (
+            {/* Progress Bar & Percentage Loading Indicator */}
+            {(loading || pushLoading) && (
+              <div className="mt-3 bg-slate-900/90 border border-purple-500/40 rounded-xl p-3.5 space-y-2.5 shadow-xl animate-fade-in">
+                {/* Header line with title and percentage badge */}
+                <div className="flex items-center justify-between text-xs font-bold">
+                  <div className="flex items-center gap-2">
+                    <RefreshCw className="w-3.5 h-3.5 text-purple-400 animate-spin" />
+                    <span className="text-slate-100">
+                      {loading ? 'در حال دریافت داده‌ها از گوگل شیت...' : 'در حال ارسال بسته‌های اطلاعات به گوگل شیت...'}
+                    </span>
+                  </div>
+                  <div className="px-2.5 py-0.5 rounded-full bg-purple-950 border border-purple-600/50 text-purple-300 font-mono text-xs font-black flex items-center gap-1 shadow-sm">
+                    <span>پیشرفت:</span>
+                    <span className="text-emerald-300">{formatPersianNumber(progressInfo?.percent || 0)}٪</span>
+                  </div>
+                </div>
+
+                {/* Progress Bar Track */}
+                <div className="w-full bg-slate-950 h-3 rounded-full overflow-hidden p-0.5 border border-slate-800 shadow-inner">
+                  <div
+                    className="bg-gradient-to-r from-purple-600 via-indigo-500 to-emerald-400 h-full rounded-full transition-all duration-300 shadow-sm"
+                    style={{ width: `${Math.max(4, progressInfo?.percent || 0)}%` }}
+                  />
+                </div>
+
+                {/* Detailed Counters and Status Message */}
+                <div className="flex flex-wrap items-center justify-between gap-2 text-[11px] text-slate-300 pt-1 border-t border-slate-800/80 font-mono">
+                  <span className="text-slate-300 font-sans font-medium flex items-center gap-1">
+                    <Sparkles className="w-3 h-3 text-purple-400" />
+                    {progressInfo?.statusMessage || 'در حال پردازش درخواست...'}
+                  </span>
+                  {progressInfo && progressInfo.total > 0 && (
+                    <div className="flex items-center gap-2.5 shrink-0 font-bold text-[11px]">
+                      <span>انجام شده: <strong className="text-emerald-400 font-mono">{formatPersianNumber(progressInfo.processed)}</strong>/<strong className="text-slate-200 font-mono">{formatPersianNumber(progressInfo.total)}</strong></span>
+                      {progressInfo.remaining > 0 && (
+                        <span className="text-amber-400 font-mono">(باقی‌مانده: {formatPersianNumber(progressInfo.remaining)})</span>
+                      )}
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+
+            {config.lastSync && !loading && !pushLoading && (
               <div className="text-[11px] text-emerald-400 flex items-center gap-1.5 pt-1">
                 <ShieldCheck className="w-3.5 h-3.5" />
                 <span>آخرین همگام‌سازی موفق: {config.lastSync}</span>
