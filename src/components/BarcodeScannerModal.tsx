@@ -49,6 +49,20 @@ export const BarcodeScannerModal: React.FC<BarcodeScannerModalProps> = ({
   const nativeDetectorRef = useRef<any>(null);
   const offscreenCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const isScanningFrameRef = useRef<boolean>(false);
+  const candidateRef = useRef<{ code: string; count: number }>({ code: '', count: 0 });
+
+  const registerCandidate = (code: string): boolean => {
+    if (candidateRef.current.code === code) {
+      candidateRef.current.count += 1;
+    } else {
+      candidateRef.current = { code, count: 1 };
+    }
+    if (candidateRef.current.count >= 2) {
+      candidateRef.current = { code: '', count: 0 };
+      return true;
+    }
+    return false;
+  };
 
   const playScanBeep = () => {
     try {
@@ -128,6 +142,7 @@ export const BarcodeScannerModal: React.FC<BarcodeScannerModalProps> = ({
       videoRef.current.srcObject = null;
     }
 
+    candidateRef.current = { code: '', count: 0 };
     setCameraActive(false);
     setIsLoading(false);
   };
@@ -162,7 +177,6 @@ export const BarcodeScannerModal: React.FC<BarcodeScannerModalProps> = ({
 
     const currentFacing = overrideFacing || facingMode;
 
-    // Check native BarcodeDetector support
     if ('BarcodeDetector' in window) {
       try {
         const supportedFormats = await (window as any).BarcodeDetector.getSupportedFormats();
@@ -174,7 +188,6 @@ export const BarcodeScannerModal: React.FC<BarcodeScannerModalProps> = ({
 
     const reader = getCodeReaderInstance();
 
-    // Enumerate video devices
     try {
       const devList = await reader.listVideoInputDevices();
       setDevices(devList);
@@ -235,7 +248,6 @@ export const BarcodeScannerModal: React.FC<BarcodeScannerModalProps> = ({
         setCameraActive(true);
         setIsLoading(false);
 
-        // Apply Focus & Zoom settings if track supports them
         const track = stream.getVideoTracks()[0];
         if (track && 'getCapabilities' in track) {
           try {
@@ -258,12 +270,10 @@ export const BarcodeScannerModal: React.FC<BarcodeScannerModalProps> = ({
           }
         }
 
-        // Initialize Canvas for frame extraction
         if (!offscreenCanvasRef.current) {
           offscreenCanvasRef.current = document.createElement('canvas');
         }
 
-        // High frequency scanning loop with Multi-Pass Canvas extraction
         let passCounter = 0;
         scanIntervalRef.current = setInterval(async () => {
           if (isScanningFrameRef.current) return;
@@ -279,14 +289,15 @@ export const BarcodeScannerModal: React.FC<BarcodeScannerModalProps> = ({
             const vWidth = video.videoWidth;
             const vHeight = video.videoHeight;
 
-            // 1. Native detector pass on live video if supported
             if (nativeDetectorRef.current) {
               try {
                 const detected = await nativeDetectorRef.current.detect(video);
                 if (detected && detected.length > 0 && detected[0].rawValue) {
                   const code = detected[0].rawValue;
-                  stopCamera();
-                  handleApplyCode(code);
+                  if (registerCandidate(code)) {
+                    stopCamera();
+                    handleApplyCode(code);
+                  }
                   return;
                 }
               } catch (e) {
@@ -294,12 +305,10 @@ export const BarcodeScannerModal: React.FC<BarcodeScannerModalProps> = ({
               }
             }
 
-            // 2. Multi-Pass Canvas extraction for ZXing
             passCounter++;
             const ctx = canvas.getContext('2d', { willReadFrequently: true });
             if (!ctx) return;
 
-            // Target processing width (scale down to ~640px for fast & smooth decoding)
             const targetW = Math.min(vWidth, 640);
             const targetH = Math.round((vHeight / vWidth) * targetW);
 
@@ -307,24 +316,23 @@ export const BarcodeScannerModal: React.FC<BarcodeScannerModalProps> = ({
             canvas.height = targetH;
 
             if (passCounter % 2 === 1) {
-              // Pass A: Center crop (70% of frame where scan box is located)
               const cropX = vWidth * 0.15;
               const cropY = vHeight * 0.15;
               const cropW = vWidth * 0.7;
               const cropH = vHeight * 0.7;
               ctx.drawImage(video, cropX, cropY, cropW, cropH, 0, 0, targetW, targetH);
             } else {
-              // Pass B: Full frame
               ctx.drawImage(video, 0, 0, targetW, targetH);
             }
 
-            // Decode frame with ZXing
             try {
               const result = await reader.decodeFromCanvas(canvas);
               if (result && result.getText()) {
                 const text = result.getText();
-                stopCamera();
-                handleApplyCode(text);
+                if (registerCandidate(text)) {
+                  stopCamera();
+                  handleApplyCode(text);
+                }
               }
             } catch (e) {
               // NotFoundException expected when no barcode in frame
@@ -333,7 +341,6 @@ export const BarcodeScannerModal: React.FC<BarcodeScannerModalProps> = ({
             isScanningFrameRef.current = false;
           }
         }, 180);
-
       }
     } catch (err: any) {
       console.error('Video decode binding error:', err);
@@ -397,7 +404,6 @@ export const BarcodeScannerModal: React.FC<BarcodeScannerModalProps> = ({
       const reader = getCodeReaderInstance();
       const imageUrl = URL.createObjectURL(file);
 
-      // Try native detector first on image
       if ('BarcodeDetector' in window) {
         try {
           const img = new Image();
@@ -441,8 +447,7 @@ export const BarcodeScannerModal: React.FC<BarcodeScannerModalProps> = ({
   return (
     <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-950/85 backdrop-blur-md animate-fade-in">
       <div className="bg-slate-900 border border-slate-800 rounded-3xl w-full max-w-md p-5 shadow-2xl relative overflow-hidden text-slate-100 flex flex-col">
-        
-        {/* Header */}
+
         <div className="flex items-center justify-between gap-3 mb-3 pb-3 border-b border-slate-800">
           <div className="flex items-center gap-2.5">
             <div className="w-9 h-9 rounded-xl bg-purple-600/20 border border-purple-500/30 flex items-center justify-center text-purple-400">
@@ -465,10 +470,8 @@ export const BarcodeScannerModal: React.FC<BarcodeScannerModalProps> = ({
           </button>
         </div>
 
-        {/* Camera / Viewfinder Box */}
         <div className="mb-3 relative rounded-2xl overflow-hidden bg-black aspect-[4/3] border-2 border-purple-500/80 flex items-center justify-center shadow-inner">
-          
-          {/* Always rendered video element so ref is always bound */}
+
           <video
             ref={videoRef}
             autoPlay
@@ -477,10 +480,8 @@ export const BarcodeScannerModal: React.FC<BarcodeScannerModalProps> = ({
             className={`w-full h-full object-cover transition-opacity duration-300 ${cameraActive ? 'opacity-100' : 'opacity-20'}`}
           />
 
-          {/* Scanner Overlay UI */}
           {cameraActive && (
             <>
-              {/* Target Scan Box */}
               <div className="absolute inset-8 sm:inset-10 border-2 border-purple-400/90 rounded-2xl pointer-events-none flex items-center justify-center shadow-[0_0_25px_rgba(168,85,247,0.4)]">
                 <div className="w-full h-0.5 bg-rose-500 shadow-[0_0_15px_#f43f5e] animate-pulse" />
                 <span className="absolute bottom-2 text-[10px] bg-slate-950/80 text-purple-200 px-2 py-0.5 rounded-md font-medium border border-purple-800/60">
@@ -488,7 +489,6 @@ export const BarcodeScannerModal: React.FC<BarcodeScannerModalProps> = ({
                 </span>
               </div>
 
-              {/* Controls Overlay Top */}
               <div className="absolute top-3 inset-x-3 flex justify-between items-center pointer-events-auto">
                 <button
                   type="button"
@@ -516,7 +516,6 @@ export const BarcodeScannerModal: React.FC<BarcodeScannerModalProps> = ({
                 )}
 
                 <div className="flex items-center gap-1">
-                  {/* Zoom Controls */}
                   {isZoomSupported && (
                     <div className="flex items-center bg-slate-900/80 rounded-xl border border-slate-700 p-0.5 backdrop-blur-md">
                       <button
@@ -554,7 +553,6 @@ export const BarcodeScannerModal: React.FC<BarcodeScannerModalProps> = ({
                 </div>
               </div>
 
-              {/* Manual capture button & Native camera capture */}
               <div className="absolute bottom-3 inset-x-3 flex justify-center gap-2">
                 <button
                   type="button"
@@ -576,7 +574,6 @@ export const BarcodeScannerModal: React.FC<BarcodeScannerModalProps> = ({
             </>
           )}
 
-          {/* Loading or Off State Overlay */}
           {(!cameraActive || isLoading) && (
             <div className="absolute inset-0 bg-slate-950/80 backdrop-blur-sm flex flex-col items-center justify-center p-5 text-center z-10">
               {isLoading ? (
@@ -625,7 +622,6 @@ export const BarcodeScannerModal: React.FC<BarcodeScannerModalProps> = ({
           )}
         </div>
 
-        {/* Native Camera Capture Input (Forces Android Camera App) */}
         <input
           ref={captureInputRef}
           type="file"
@@ -635,7 +631,6 @@ export const BarcodeScannerModal: React.FC<BarcodeScannerModalProps> = ({
           className="hidden"
         />
 
-        {/* Hidden File Input for Image Upload */}
         <input
           ref={fileInputRef}
           type="file"
@@ -644,7 +639,6 @@ export const BarcodeScannerModal: React.FC<BarcodeScannerModalProps> = ({
           className="hidden"
         />
 
-        {/* Manual Barcode Input */}
         <div className="space-y-1.5 mb-3">
           <label className="block text-[11px] font-bold text-slate-300">وارد کردن دستی یا با بارکدخوان USB:</label>
           <div className="flex gap-2">
@@ -667,7 +661,6 @@ export const BarcodeScannerModal: React.FC<BarcodeScannerModalProps> = ({
           </div>
         </div>
 
-        {/* Error Feedback */}
         {errorMsg && (
           <div className="p-3 bg-rose-950/50 border border-rose-800/60 rounded-xl text-rose-300 text-xs flex items-center gap-2 mb-3">
             <AlertCircle className="w-4 h-4 shrink-0 text-rose-400" />
@@ -675,7 +668,6 @@ export const BarcodeScannerModal: React.FC<BarcodeScannerModalProps> = ({
           </div>
         )}
 
-        {/* Success / Scanned feedback */}
         {scannedResult && (
           <div className="p-3 bg-emerald-950/50 border border-emerald-800/60 rounded-xl text-xs text-emerald-200 mb-3 flex items-center justify-between animate-fade-in">
             <div className="flex items-center gap-2">
@@ -698,7 +690,6 @@ export const BarcodeScannerModal: React.FC<BarcodeScannerModalProps> = ({
           </div>
         )}
 
-        {/* Found product info if search mode */}
         {foundProduct && (
           <div className="p-3 bg-indigo-950/50 border border-indigo-800/60 rounded-xl text-xs text-indigo-200 mb-3 flex items-center justify-between animate-fade-in">
             <div>
@@ -722,5 +713,3 @@ export const BarcodeScannerModal: React.FC<BarcodeScannerModalProps> = ({
     </div>
   );
 };
-
-
