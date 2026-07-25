@@ -175,11 +175,16 @@ export async function fetchAndProcessGoogleSheet(
         const newProducts: Product[] = [];
         const duplicateMatches: DuplicateMatch[] = [];
 
+        // Build fast O(1) Map lookup for existing products to prevent main thread freezing
+        const existingMap = new Map<string, Product>();
+        existingProducts.forEach((ep) => {
+          const key = `${ep.name.trim().toLowerCase()}___${(ep.brand || '').trim().toLowerCase()}`;
+          existingMap.set(key, ep);
+        });
+
         formattedProducts.forEach((p) => {
-          const match = existingProducts.find(
-            (ep) => ep.name.trim().toLowerCase() === p.name.trim().toLowerCase() &&
-                    (ep.brand || '').trim().toLowerCase() === (p.brand || '').trim().toLowerCase()
-          );
+          const key = `${p.name.trim().toLowerCase()}___${(p.brand || '').trim().toLowerCase()}`;
+          const match = existingMap.get(key);
 
           if (match) {
             const incomingProduct: Product = {

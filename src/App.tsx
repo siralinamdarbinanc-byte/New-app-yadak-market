@@ -220,6 +220,13 @@ export default function App() {
   // Toast message for background auto sync actions
   const [autoSyncToast, setAutoSyncToast] = useState<string | null>(null);
 
+  // Sync locks to prevent race conditions & browser thread locking
+  const isSyncingRef = useRef<boolean>(false);
+  const productsRef = useRef<Product[]>(products);
+  useEffect(() => {
+    productsRef.current = products;
+  }, [products]);
+
   // Auto-Push pending changes to Google Sheets when autoSync is enabled
   useEffect(() => {
     if (!sheetsConfig.autoSync || !sheetsConfig.sheetUrl || pendingChanges.length === 0) {
@@ -227,8 +234,11 @@ export default function App() {
     }
 
     const timer = setTimeout(async () => {
+      if (isSyncingRef.current) return;
+      isSyncingRef.current = true;
       try {
-        const res = await pushProductsToGoogleSheet(sheetsConfig.sheetUrl, pendingChanges);
+        const changesToSend = [...pendingChanges];
+        const res = await pushProductsToGoogleSheet(sheetsConfig.sheetUrl, changesToSend);
         if (res) {
           handleClearPendingChanges();
           const syncTime = new Date().toLocaleTimeString('fa-IR') + ' - ' + new Date().toLocaleDateString('fa-IR');
@@ -236,13 +246,15 @@ export default function App() {
             ...prev,
             lastSync: syncTime,
           }));
-          setAutoSyncToast(`ارسال خودکار: ${formatPersianNumber(pendingChanges.length)} تغییر جدید به گوگل شیت منتقل شد.`);
+          setAutoSyncToast(`ارسال خودکار: ${formatPersianNumber(changesToSend.length)} تغییر جدید به گوگل شیت منتقل شد.`);
           setTimeout(() => setAutoSyncToast(null), 4000);
         }
       } catch (err) {
         console.warn('ارسال خودکار به گوگل شیت با خطا مواجه شد:', err);
+      } finally {
+        isSyncingRef.current = false;
       }
-    }, 3000);
+    }, 5000); // 5 sec debounce for smooth typing
 
     return () => clearTimeout(timer);
   }, [pendingChanges, sheetsConfig.autoSync, sheetsConfig.sheetUrl]);
@@ -254,8 +266,10 @@ export default function App() {
     }
 
     const performAutoPull = async () => {
+      if (isSyncingRef.current) return;
+      isSyncingRef.current = true;
       try {
-        const preview = await fetchAndProcessGoogleSheet(sheetsConfig.sheetUrl, products);
+        const preview = await fetchAndProcessGoogleSheet(sheetsConfig.sheetUrl, productsRef.current);
         const modifiedDuplicates = preview.duplicateMatches.filter((m) => m.hasChanges && !m.isStale);
 
         if (preview.newProducts.length > 0 || modifiedDuplicates.length > 0) {
@@ -278,6 +292,8 @@ export default function App() {
         }
       } catch (err) {
         console.warn('دریافت خودکار از گوگل شیت با خطا مواجه شد:', err);
+      } finally {
+        isSyncingRef.current = false;
       }
     };
 
@@ -285,7 +301,7 @@ export default function App() {
     const interval = setInterval(performAutoPull, 60000);
 
     return () => clearInterval(interval);
-  }, [sheetsConfig.autoSync, sheetsConfig.sheetUrl, products]);
+  }, [sheetsConfig.autoSync, sheetsConfig.sheetUrl]);
 
   // Extract unique categories list
   const uniqueCategories = useMemo(() => {

@@ -48,6 +48,7 @@ export const BarcodeScannerModal: React.FC<BarcodeScannerModalProps> = ({
   const scanIntervalRef = useRef<any>(null);
   const nativeDetectorRef = useRef<any>(null);
   const offscreenCanvasRef = useRef<HTMLCanvasElement | null>(null);
+  const isScanningFrameRef = useRef<boolean>(false);
 
   const playScanBeep = () => {
     try {
@@ -265,85 +266,73 @@ export const BarcodeScannerModal: React.FC<BarcodeScannerModalProps> = ({
         // High frequency scanning loop with Multi-Pass Canvas extraction
         let passCounter = 0;
         scanIntervalRef.current = setInterval(async () => {
-          const video = videoRef.current;
-          if (!video || video.readyState < 2 || video.videoWidth < 10) return;
+          if (isScanningFrameRef.current) return;
+          isScanningFrameRef.current = true;
 
-          const canvas = offscreenCanvasRef.current;
-          if (!canvas) return;
-
-          const vWidth = video.videoWidth;
-          const vHeight = video.videoHeight;
-
-          // 1. Native detector pass on live video if supported
-          if (nativeDetectorRef.current) {
-            try {
-              const detected = await nativeDetectorRef.current.detect(video);
-              if (detected && detected.length > 0 && detected[0].rawValue) {
-                const code = detected[0].rawValue;
-                stopCamera();
-                handleApplyCode(code);
-                return;
-              }
-            } catch (e) {
-              // ignore frame error
-            }
-          }
-
-          // 2. Multi-Pass Canvas extraction for ZXing
-          passCounter++;
-          const ctx = canvas.getContext('2d', { willReadFrequently: true });
-          if (!ctx) return;
-
-          // Target processing width (scale high-res video down to ~900px for fast & sharp decoding)
-          const targetW = Math.min(vWidth, 900);
-          const targetH = Math.round((vHeight / vWidth) * targetW);
-
-          canvas.width = targetW;
-          canvas.height = targetH;
-
-          if (passCounter % 2 === 1) {
-            // Pass A: Center crop (70% of frame where scan box is located)
-            const cropX = vWidth * 0.15;
-            const cropY = vHeight * 0.15;
-            const cropW = vWidth * 0.7;
-            const cropH = vHeight * 0.7;
-            ctx.drawImage(video, cropX, cropY, cropW, cropH, 0, 0, targetW, targetH);
-          } else {
-            // Pass B: Full frame
-            ctx.drawImage(video, 0, 0, targetW, targetH);
-          }
-
-          // Apply contrast enhancement on every 4th pass for low-light / glossy barcodes
-          if (passCounter % 4 === 0) {
-            try {
-              const imgData = ctx.getImageData(0, 0, targetW, targetH);
-              const data = imgData.data;
-              for (let i = 0; i < data.length; i += 4) {
-                // Greyscale + Contrast boost
-                const avg = (data[i] + data[i + 1] + data[i + 2]) / 3;
-                const v = avg < 110 ? 0 : 255;
-                data[i] = v;
-                data[i + 1] = v;
-                data[i + 2] = v;
-              }
-              ctx.putImageData(imgData, 0, 0);
-            } catch (e) {
-              // ignore canvas manipulation errors
-            }
-          }
-
-          // Decode frame with ZXing
           try {
-            const result = await reader.decodeFromCanvas(canvas);
-            if (result && result.getText()) {
-              const text = result.getText();
-              stopCamera();
-              handleApplyCode(text);
+            const video = videoRef.current;
+            if (!video || video.readyState < 2 || video.videoWidth < 10) return;
+
+            const canvas = offscreenCanvasRef.current;
+            if (!canvas) return;
+
+            const vWidth = video.videoWidth;
+            const vHeight = video.videoHeight;
+
+            // 1. Native detector pass on live video if supported
+            if (nativeDetectorRef.current) {
+              try {
+                const detected = await nativeDetectorRef.current.detect(video);
+                if (detected && detected.length > 0 && detected[0].rawValue) {
+                  const code = detected[0].rawValue;
+                  stopCamera();
+                  handleApplyCode(code);
+                  return;
+                }
+              } catch (e) {
+                // ignore frame error
+              }
             }
-          } catch (e) {
-            // NotFoundException expected when no barcode in frame
+
+            // 2. Multi-Pass Canvas extraction for ZXing
+            passCounter++;
+            const ctx = canvas.getContext('2d', { willReadFrequently: true });
+            if (!ctx) return;
+
+            // Target processing width (scale down to ~640px for fast & smooth decoding)
+            const targetW = Math.min(vWidth, 640);
+            const targetH = Math.round((vHeight / vWidth) * targetW);
+
+            canvas.width = targetW;
+            canvas.height = targetH;
+
+            if (passCounter % 2 === 1) {
+              // Pass A: Center crop (70% of frame where scan box is located)
+              const cropX = vWidth * 0.15;
+              const cropY = vHeight * 0.15;
+              const cropW = vWidth * 0.7;
+              const cropH = vHeight * 0.7;
+              ctx.drawImage(video, cropX, cropY, cropW, cropH, 0, 0, targetW, targetH);
+            } else {
+              // Pass B: Full frame
+              ctx.drawImage(video, 0, 0, targetW, targetH);
+            }
+
+            // Decode frame with ZXing
+            try {
+              const result = await reader.decodeFromCanvas(canvas);
+              if (result && result.getText()) {
+                const text = result.getText();
+                stopCamera();
+                handleApplyCode(text);
+              }
+            } catch (e) {
+              // NotFoundException expected when no barcode in frame
+            }
+          } finally {
+            isScanningFrameRef.current = false;
           }
-        }, 120);
+        }, 180);
 
       }
     } catch (err: any) {
