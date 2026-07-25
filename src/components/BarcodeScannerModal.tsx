@@ -316,11 +316,11 @@ export const BarcodeScannerModal: React.FC<BarcodeScannerModalProps> = ({
             canvas.height = targetH;
 
             if (passCounter % 2 === 1) {
-              const cropX = vWidth * 0.15;
-              const cropY = vHeight * 0.15;
-              const cropW = vWidth * 0.7;
-              const cropH = vHeight * 0.7;
-              ctx.drawImage(video, cropX, cropY, cropW, cropH, 0, 0, targetW, targetH);
+              // Crop only vertically (full width) so wide EAN-13 barcodes are never
+              // cut off on the sides — this was truncating scanned digits.
+              const cropY = vHeight * 0.2;
+              const cropH = vHeight * 0.6;
+              ctx.drawImage(video, 0, cropY, vWidth, cropH, 0, 0, targetW, targetH);
             } else {
               ctx.drawImage(video, 0, 0, targetW, targetH);
             }
