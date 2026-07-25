@@ -8,15 +8,17 @@ import { Header } from './components/Header';
 import { SearchBar } from './components/SearchBar';
 import { ProductCard } from './components/ProductCard';
 import { ProductModal } from './components/ProductModal';
-import { BarcodeScannerModal } from './components/BarcodeScannerModal';
-import { CsvImportModal } from './components/CsvImportModal';
-import { GoogleSheetsModal } from './components/GoogleSheetsModal';
-import { PricingSettingsModal } from './components/PricingSettingsModal';
-import { AnalyticsModal } from './components/AnalyticsModal';
-import { AddProductModal } from './components/AddProductModal';
-import { SettingsToolsModal } from './components/SettingsToolsModal';
-import { LocationModal } from './components/LocationModal';
 import { ChevronDown, Package, Layers, Sparkles, PhoneCall, RefreshCw, AlertTriangle, Cloud } from 'lucide-react';
+
+const BarcodeScannerModal = React.lazy(() => import('./components/BarcodeScannerModal').then((m) => ({ default: m.BarcodeScannerModal })));
+const CsvImportModal = React.lazy(() => import('./components/CsvImportModal').then((m) => ({ default: m.CsvImportModal })));
+const GoogleSheetsModal = React.lazy(() => import('./components/GoogleSheetsModal').then((m) => ({ default: m.GoogleSheetsModal })));
+const PricingSettingsModal = React.lazy(() => import('./components/PricingSettingsModal').then((m) => ({ default: m.PricingSettingsModal })));
+const AnalyticsModal = React.lazy(() => import('./components/AnalyticsModal').then((m) => ({ default: m.AnalyticsModal })));
+const AddProductModal = React.lazy(() => import('./components/AddProductModal').then((m) => ({ default: m.AddProductModal })));
+const SettingsToolsModal = React.lazy(() => import('./components/SettingsToolsModal').then((m) => ({ default: m.SettingsToolsModal })));
+const LocationModal = React.lazy(() => import('./components/LocationModal').then((m) => ({ default: m.LocationModal })));
+
 
 const ITEMS_PER_PAGE = 36;
 
@@ -643,89 +645,91 @@ export default function App() {
         onSave={handleSaveProduct}
       />
 
-      <BarcodeScannerModal
-        isOpen={isScannerOpen}
-        onClose={() => setIsScannerOpen(false)}
-        onDetected={handleBarcodeDetected}
-      />
+      <React.Suspense fallback={null}>
+        <BarcodeScannerModal
+          isOpen={isScannerOpen}
+          onClose={() => setIsScannerOpen(false)}
+          onDetected={handleBarcodeDetected}
+        />
 
-      <CsvImportModal
-        isOpen={isCsvModalOpen}
-        onClose={() => setIsCsvModalOpen(false)}
-        existingProducts={products}
-        onImport={handleImportCsv}
-        onRestoreBackup={(backupProducts) => setProducts(backupProducts)}
-      />
+        <CsvImportModal
+          isOpen={isCsvModalOpen}
+          onClose={() => setIsCsvModalOpen(false)}
+          existingProducts={products}
+          onImport={handleImportCsv}
+          onRestoreBackup={(backupProducts) => setProducts(backupProducts)}
+        />
 
-      <GoogleSheetsModal
-        isOpen={isSheetsModalOpen}
-        onClose={() => setIsSheetsModalOpen(false)}
-        config={sheetsConfig}
-        onSaveConfig={(cfg) => setSheetsConfig(cfg)}
-        existingProducts={products}
-        pendingChanges={pendingChanges}
-        onClearPendingChanges={handleClearPendingChanges}
-        onApplySync={handleImportCsv}
-      />
+        <GoogleSheetsModal
+          isOpen={isSheetsModalOpen}
+          onClose={() => setIsSheetsModalOpen(false)}
+          config={sheetsConfig}
+          onSaveConfig={(cfg) => setSheetsConfig(cfg)}
+          existingProducts={products}
+          pendingChanges={pendingChanges}
+          onClearPendingChanges={handleClearPendingChanges}
+          onApplySync={handleImportCsv}
+        />
 
-      <PricingSettingsModal
-        isOpen={isPricingModalOpen}
-        onClose={() => setIsPricingModalOpen(false)}
-        generalMarkup={generalMarkup}
-        brandMarkupMap={brandMarkupMap}
-        categoryMarkupMap={categoryMarkupMap}
-        onSave={(newGeneral, newBrandMap, newCategoryMap) => {
-          setGeneralMarkup(newGeneral);
-          setBrandMarkupMap(newBrandMap);
-          setCategoryMarkupMap(newCategoryMap);
-        }}
-        brands={uniqueBrands}
-        categories={uniqueCategories}
-      />
+        <PricingSettingsModal
+          isOpen={isPricingModalOpen}
+          onClose={() => setIsPricingModalOpen(false)}
+          generalMarkup={generalMarkup}
+          brandMarkupMap={brandMarkupMap}
+          categoryMarkupMap={categoryMarkupMap}
+          onSave={(newGeneral, newBrandMap, newCategoryMap) => {
+            setGeneralMarkup(newGeneral);
+            setBrandMarkupMap(newBrandMap);
+            setCategoryMarkupMap(newCategoryMap);
+          }}
+          brands={uniqueBrands}
+          categories={uniqueCategories}
+        />
 
-      <AnalyticsModal
-        isOpen={isAnalyticsModalOpen}
-        onClose={() => setIsAnalyticsModalOpen(false)}
-        analytics={analytics}
-        products={products}
-        currencyMode={currencyMode}
-        onToggleCurrency={handleToggleCurrency}
-        onSelectProduct={(p) => setSelectedProduct(p)}
-        onResetAllStock={() => {
-          setProducts((prev) => prev.map((p) => ({ ...p, stock: 0 })));
-        }}
-      />
+        <AnalyticsModal
+          isOpen={isAnalyticsModalOpen}
+          onClose={() => setIsAnalyticsModalOpen(false)}
+          analytics={analytics}
+          products={products}
+          currencyMode={currencyMode}
+          onToggleCurrency={handleToggleCurrency}
+          onSelectProduct={(p) => setSelectedProduct(p)}
+          onResetAllStock={() => {
+            setProducts((prev) => prev.map((p) => ({ ...p, stock: 0 })));
+          }}
+        />
 
-      <AddProductModal
-        isOpen={isAddModalOpen}
-        onClose={() => setIsAddModalOpen(false)}
-        onAdd={handleAddProduct}
-        brands={uniqueBrands}
-        categories={uniqueCategories}
-      />
+        <AddProductModal
+          isOpen={isAddModalOpen}
+          onClose={() => setIsAddModalOpen(false)}
+          onAdd={handleAddProduct}
+          brands={uniqueBrands}
+          categories={uniqueCategories}
+        />
 
-      <SettingsToolsModal
-        isOpen={isSettingsToolsModalOpen}
-        onClose={() => setIsSettingsToolsModalOpen(false)}
-        currencyMode={currencyMode}
-        onToggleCurrency={handleToggleCurrency}
-        fontSizeSettings={fontSizeSettings}
-        onUpdateFontSizeSettings={setFontSizeSettings}
-        onOpenCsvModal={() => setIsCsvModalOpen(true)}
-        onOpenSheetsModal={() => setIsSheetsModalOpen(true)}
-        onOpenPricingModal={() => setIsPricingModalOpen(true)}
-        onOpenAnalyticsModal={() => setIsAnalyticsModalOpen(true)}
-        generalMarkup={generalMarkup}
-        lowStockCount={analytics.lowStockCount}
-        totalProductsCount={products.length}
-      />
+        <SettingsToolsModal
+          isOpen={isSettingsToolsModalOpen}
+          onClose={() => setIsSettingsToolsModalOpen(false)}
+          currencyMode={currencyMode}
+          onToggleCurrency={handleToggleCurrency}
+          fontSizeSettings={fontSizeSettings}
+          onUpdateFontSizeSettings={setFontSizeSettings}
+          onOpenCsvModal={() => setIsCsvModalOpen(true)}
+          onOpenSheetsModal={() => setIsSheetsModalOpen(true)}
+          onOpenPricingModal={() => setIsPricingModalOpen(true)}
+          onOpenAnalyticsModal={() => setIsAnalyticsModalOpen(true)}
+          generalMarkup={generalMarkup}
+          lowStockCount={analytics.lowStockCount}
+          totalProductsCount={products.length}
+        />
 
-      <LocationModal
-        product={locationProduct}
-        isOpen={!!locationProduct}
-        onClose={() => setLocationProduct(null)}
-        onSaveLocation={handleUpdateLocation}
-      />
+        <LocationModal
+          product={locationProduct}
+          isOpen={!!locationProduct}
+          onClose={() => setLocationProduct(null)}
+          onSaveLocation={handleUpdateLocation}
+        />
+      </React.Suspense>
 
       {/* Floating Auto-Sync Toast Notification */}
       {autoSyncToast && (
